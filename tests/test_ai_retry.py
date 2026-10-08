@@ -19,7 +19,7 @@ from backend.ai import (
     MockVisionProvider,
     run_ai_queue,
 )
-from backend.ai.queue import VIDEO_UNSUPPORTED_REASON
+from backend.ai.queue import VIDEO_UNSUPPORTED_REASON, process_single_media
 from backend.config import Settings, load_settings
 from backend.database.database import transaction
 
@@ -290,6 +290,31 @@ async def test_success_resets_a_preexisting_budget(
     row = media_row(db, media_id)
     assert row["processing_status"] == "READY"
     assert int(row["ai_attempts"]) == 0 and row["ai_next_retry_at"] is None
+
+
+async def test_manual_reanalyze_resets_an_exhausted_budget(
+    db: sqlite3.Connection, sample_images: dict[str, Path]
+) -> None:
+    """A manual Reanalyze (process_single_media) starts a fresh retry cycle.
+
+    An exhausted FAILED item (attempts at the cap) must re-enter the deferral
+    loop on the next transient error instead of failing terminally at once.
+    """
+    settings = make_settings()
+    media_id = insert_media(db, sample_images["png"])
+    with transaction(db):
+        db.execute(
+            "UPDATE media SET processing_status = 'FAILED', ai_attempts = ? WHERE id = ?",
+            (settings.ai.max_item_attempts, media_id),
+        )
+
+    result = await process_single_media(db, media_id, TransientVisionProvider(), settings)
+
+    assert result.deferred  # budget was reset → still within its retry cycle
+    row = media_row(db, media_id)
+    assert row["processing_status"] == "DOWNLOADED"  # parked for the supervisor
+    assert int(row["ai_attempts"]) == 1
+    assert row["ai_next_retry_at"] is not None
 
 
 async def test_job_message_reports_deferred_counters(

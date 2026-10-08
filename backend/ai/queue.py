@@ -248,6 +248,11 @@ async def process_single_media(
     raised. A retryable provider failure can come back
     ``deferred=True`` (the row returns to ``DOWNLOADED``/``ANALYZED`` for the
     background queue); success clears ``ai_attempts``/``ai_next_retry_at``.
+
+    A manual run also **resets the retry budget** (``ai_attempts``/``ai_next_retry_at``):
+    the user's explicit intent starts a fresh cycle, so an exhausted item
+    re-enters the background deferral loop instead of failing terminally on
+    its very first hiccup.
     """
     row = conn.execute(
         "SELECT id, file_path, mime_type, extension FROM media WHERE id = ?", (media_id,)
@@ -255,7 +260,11 @@ async def process_single_media(
     if row is None:
         raise ValueError(f"no media row with id={media_id}")
     with transaction(conn):
-        conn.execute("UPDATE media SET processing_status = 'ANALYZING' WHERE id = ?", (media_id,))
+        conn.execute(
+            "UPDATE media SET processing_status = 'ANALYZING', "
+            "ai_attempts = 0, ai_next_retry_at = NULL WHERE id = ?",
+            (media_id,),
+        )
     return await _process(
         conn, media_id, row["file_path"], row["mime_type"], row["extension"], provider, settings
     )
