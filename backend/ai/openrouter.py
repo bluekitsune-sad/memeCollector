@@ -21,8 +21,13 @@ Endpoints (OpenAI-compatible):
 Retries: HTTP 429/5xx and transport/timeout failures are retried with
 exponential backoff (:mod:`backend.scraper.backoff`, same math as the crawler)
 up to ``settings.ai.retry_attempts``; other 4xx fail immediately with a mapped
-:class:`~backend.ai.provider.AIProviderError`. Concurrency is deliberately NOT
-handled here — the AI queue bounds it with ``settings.ai.ai_concurrency``.
+:class:`~backend.ai.provider.AIProviderError`. Exhausted transient failures are
+raised with ``retryable=True`` and model-response problems (reasoning-only
+answers, provider ``error`` bodies, malformed JSON) likewise, so the AI queue
+can defer the item and try again later; permanent errors (bad key, unknown
+model, unsupported embeddings model, corrupt stored metadata) stay
+``retryable=False``. Concurrency is deliberately NOT handled here — the AI
+queue bounds it with ``settings.ai.ai_concurrency``.
 
 Security/privacy (PRD §41–42): the API key is read from ``settings.ai.api_key``
 (env only) and travels solely in the ``Authorization`` header of outgoing
@@ -150,7 +155,13 @@ class OpenRouterProvider(VisionProvider):
 
     async def _analyze(self, content: list[dict[str, Any]]) -> dict[str, Any]:
         text = await self._chat_json(content)
-        return normalize_analysis(_extract_json(text))
+        try:
+            return normalize_analysis(_extract_json(text))
+        except AIResponseError as exc:
+            if exc.retryable:
+                raise
+            # A wrong-shape/wrong-type model answer can come out right next attempt.
+            raise AIResponseError(str(exc), retryable=True) from exc
 
     async def _chat_json(self, content: list[dict[str, Any]]) -> str:
         payload: dict[str, Any] = {
@@ -194,13 +205,15 @@ class OpenRouterProvider(VisionProvider):
             except httpx.TimeoutException:
                 last_error = AITimeoutError(
                     f"OpenRouter {endpoint} request timed out "
-                    f"(timeout={self._settings.timeout_seconds}s, attempts={attempt + 1})"
+                    f"(timeout={self._settings.timeout_seconds}s, attempts={attempt + 1})",
+                    retryable=True,
                 )
                 logger.warning("openrouter timeout endpoint=%s attempt=%d/%d", endpoint, attempt + 1, attempts)
                 continue
             except httpx.HTTPError as exc:
                 last_error = AIUnavailableError(
-                    f"OpenRouter {endpoint} unreachable: {type(exc).__name__} (attempts={attempt + 1})"
+                    f"OpenRouter {endpoint} unreachable: {type(exc).__name__} (attempts={attempt + 1})",
+                    retryable=True,
                 )
                 logger.warning(
                     "openrouter transport error endpoint=%s reason=%s attempt=%d/%d",
@@ -211,7 +224,7 @@ class OpenRouterProvider(VisionProvider):
             if 200 <= status < 300:
                 return response
             if status == 429 or status >= 500:
-                last_error = AIUnavailableError(f"OpenRouter {endpoint} HTTP {status}")
+                last_error = AIUnavailableError(f"OpenRouter {endpoint} HTTP {status}", retryable=True)
                 retry_after = parse_retry_after(response.headers.get("retry-after"))
                 logger.warning(
                     "openrouter transient failure endpoint=%s status=%d attempt=%d/%d",
@@ -220,7 +233,7 @@ class OpenRouterProvider(VisionProvider):
                 continue
             return response  # non-retryable 4xx — the caller maps it to a typed error
         if last_error is None:  # unreachable: the loop always sets it before the final continue
-            last_error = AIUnavailableError(f"OpenRouter {endpoint} request failed")
+            last_error = AIUnavailableError(f"OpenRouter {endpoint} request failed", retryable=True)
         raise last_error
 
     def _ensure_client(self) -> httpx.AsyncClient:
@@ -236,8 +249,14 @@ def _image_part(image_bytes: bytes, mime_type: str) -> dict[str, Any]:
 
 
 def _http_error(response: httpx.Response, *, endpoint: str, model: str) -> AIUnavailableError:
-    """Map a non-retryable chat HTTP error to an actionable :class:`AIUnavailableError`."""
+    """Map a non-retryable chat HTTP error to an actionable :class:`AIUnavailableError`.
+
+    Only 429/5xx-class outcomes (which reach here only if retries were
+    exhausted) are marked ``retryable``; 401/403/404/other 4xx need a
+    configuration fix and stay permanent.
+    """
     status = response.status_code
+    retryable = status == 429 or status >= 500
     if status in (401, 403):
         return AIUnavailableError(
             f"OpenRouter rejected the API key (HTTP {status}) — check OPENROUTER_API_KEY in .env"
@@ -246,18 +265,53 @@ def _http_error(response: httpx.Response, *, endpoint: str, model: str) -> AIUna
         return AIUnavailableError(
             f"OpenRouter {endpoint} model not found (HTTP 404) — check ai.model={model!r} in config.yaml"
         )
-    return AIUnavailableError(f"OpenRouter {endpoint} request failed (HTTP {status})")
+    return AIUnavailableError(
+        f"OpenRouter {endpoint} request failed (HTTP {status})", retryable=retryable
+    )
+
+
+def _model_reasoning(body: Any) -> bool:
+    """True when ``choices[0].message`` carries ``reasoning``/``reasoning_content`` only."""
+    try:
+        message = body["choices"][0]["message"]
+        return bool(message.get("reasoning") or message.get("reasoning_content"))
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return False
 
 
 def _message_content(response: httpx.Response) -> str:
-    """Extract ``choices[0].message.content`` from a chat-completions response."""
+    """Extract ``choices[0].message.content`` from a chat-completions response.
+
+    Raises a **retryable** :class:`AIResponseError` for a body carrying an
+    ``error`` object (``"provider error: …"``), a reasoning-only message with
+    no content, empty content, or a shape the OpenAI schema does not explain —
+    the free thinking-models answer these differently from run to run, so the
+    queue defers the item instead of failing it permanently.
+    """
     try:
         body = response.json()
+    except ValueError as exc:
+        raise AIResponseError(
+            f"unexpected chat completion response shape: {type(exc).__name__}", retryable=True
+        ) from exc
+    if isinstance(body, dict) and "error" in body:
+        error = body["error"]
+        detail = error.get("message", error) if isinstance(error, dict) else error
+        raise AIResponseError(f"provider error: {detail}", retryable=True)
+    try:
         content = body["choices"][0]["message"]["content"]
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise AIResponseError(f"unexpected chat completion response shape: {type(exc).__name__}") from exc
+    except (KeyError, IndexError, TypeError) as exc:
+        if _model_reasoning(body):
+            raise AIResponseError(
+                "model returned only reasoning, no content", retryable=True
+            ) from exc
+        raise AIResponseError(
+            f"unexpected chat completion response shape: {type(exc).__name__}", retryable=True
+        ) from exc
     if not isinstance(content, str) or not content.strip():
-        raise AIResponseError("chat completion returned empty message content")
+        if _model_reasoning(body):
+            raise AIResponseError("model returned only reasoning, no content", retryable=True)
+        raise AIResponseError("chat completion returned empty message content", retryable=True)
     return content
 
 
@@ -275,7 +329,7 @@ def _extract_json(text: str) -> Any:
             return json.loads(candidate)
         except json.JSONDecodeError:
             continue
-    raise AIResponseError(f"malformed JSON in AI response: {text[:160]!r}")
+    raise AIResponseError(f"malformed JSON in AI response: {text[:160]!r}", retryable=True)
 
 
 def _strip_fences(text: str) -> str | None:

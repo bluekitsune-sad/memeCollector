@@ -12,9 +12,10 @@ Start point for Milestone 5's Add Source flow:
   then the dup scan/purge — each with its own ``jobs`` row, so one scrape
   request produces crawl → thumbnail → dup_scan entries in the Jobs UI while
   the stages remain separate workers (PRD §57).
-* Next comes the AI queue (PROCESS, PRD §18): it is guarded by the
-  ``app.state.ai_queue_running`` flag so two overlapping scrapes never run two
-  claiming queues at once, and it degrades gracefully — when no provider can be
+* Next comes the AI queue (PROCESS, PRD §18): it is guarded by
+  ``app.state.ai_queue_running`` (the shared :class:`backend.ai.runner.AIQueueGate`,
+  also held by the background AI supervisor) so two overlapping runs never
+  claim the queue at once, and it degrades gracefully — when no provider can be
   built (``openrouter`` without ``OPENROUTER_API_KEY``) the stage logs a
   warning and the pipeline finishes with the media still ``DOWNLOADED``
   (PRD §19, §36: a missing key never breaks a scrape).
@@ -35,8 +36,9 @@ from typing import Literal
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from backend.ai.provider import AIUnavailableError, create_provider
+from backend.ai.provider import AIUnavailableError, VisionProvider, create_provider
 from backend.ai.queue import run_ai_queue
+from backend.ai.runner import AIQueueGate
 from backend.api.schemas import JobOut, job_from_row
 from backend.jobs.crawl_job import CrawlJob
 from backend.jobs.dup_job import run_dup_job
@@ -159,6 +161,11 @@ async def _run_pipeline(app: FastAPI, job: CrawlJob) -> None:
     except Exception as exc:
         logger.warning("dup stage failed after crawl job_id=%s error=%s", job.job_id, exc)
     await _run_ai_stage(app, job.job_id)
+    # Wake the background supervisor: any leftovers (guard contention, a key
+    # configured since startup, deferred rows) deserve a prompt run, not a poll.
+    supervisor = getattr(app.state, "ai_supervisor", None)
+    if supervisor is not None:
+        supervisor.nudge()
     try:
         await run_index_job(app.state.db)
     except Exception as exc:
@@ -168,43 +175,50 @@ async def _run_pipeline(app: FastAPI, job: CrawlJob) -> None:
 async def _run_ai_stage(app: FastAPI, job_id: int | None) -> None:
     """Drain the AI queue for everything this scrape stored (PRD §18, §19, §36).
 
-    Concurrency guard: ``app.state.ai_queue_running`` is set for the duration of
-    the run, so a second scrape that finishes its crawl while a queue is live
-    skips this stage (claiming is status-based — one queue at a time is
-    assumed, see :mod:`backend.ai.queue`) instead of double-processing rows.
+    Concurrency guard: the stage claims :class:`backend.ai.runner.AIQueueGate`
+    — a compare-and-set over ``app.state.ai_queue_running`` shared with the
+    background :class:`backend.ai.supervisor.AISupervisor` — for the duration
+    of the run, so a second scrape (or the supervisor) that finishes its work
+    while a queue is live skips this stage (claiming is status-based — one
+    queue at a time is assumed, see :mod:`backend.ai.queue`) instead of
+    double-processing rows.
 
     Missing provider/key is *not* a failure: ``create_provider`` raises
     :class:`~backend.ai.provider.AIUnavailableError` for ``openrouter`` without
     ``OPENROUTER_API_KEY``, which logs the expected offline-mode warning and
-    leaves the media ``DOWNLOADED`` for a later run. The queue owns its own
-    ``jobs`` row (``job_type='ai_analysis'``).
+    leaves the media ``DOWNLOADED`` for a later run (the supervisor picks it up
+    once a key is configured). The queue owns its own ``jobs`` row
+    (``job_type='ai_analysis'``).
     """
-    if getattr(app.state, "ai_queue_running", False):
+    gate = AIQueueGate(app.state)
+    if not gate.try_acquire():
         logger.info("ai stage skipped: queue already running job_id=%s", job_id)
         return
+    provider: VisionProvider | None = None
     try:
-        provider = create_provider(app.state.settings)
-    except AIUnavailableError as exc:
-        logger.warning("AI stage skipped (no provider/key) — media remains DOWNLOADED (%s)", exc)
-        return
-    except Exception as exc:
-        logger.warning("ai stage skipped: provider setup failed job_id=%s error=%s", job_id, exc)
-        return
-    app.state.ai_queue_running = True
-    try:
-        summary = await run_ai_queue(app.state.db, provider, app.state.settings)
-        logger.info(
-            "ai stage finished job_id=%s queue_job=%d total=%d ready=%d failed=%d",
-            job_id, summary.job_id, summary.total, summary.ready, summary.failed,
-        )
-    except Exception as exc:
-        logger.warning("ai stage failed job_id=%s error=%s", job_id, exc)
-    finally:
-        app.state.ai_queue_running = False
         try:
-            await provider.aclose()
+            provider = create_provider(app.state.settings)
+        except AIUnavailableError as exc:
+            logger.warning("AI stage skipped (no provider/key) — media remains DOWNLOADED (%s)", exc)
+            return
         except Exception as exc:
-            logger.warning("ai provider close failed job_id=%s error=%s", job_id, exc)
+            logger.warning("ai stage skipped: provider setup failed job_id=%s error=%s", job_id, exc)
+            return
+        try:
+            summary = await run_ai_queue(app.state.db, provider, app.state.settings)
+            logger.info(
+                "ai stage finished job_id=%s queue_job=%d total=%d ready=%d failed=%d",
+                job_id, summary.job_id, summary.total, summary.ready, summary.failed,
+            )
+        except Exception as exc:
+            logger.warning("ai stage failed job_id=%s error=%s", job_id, exc)
+    finally:
+        gate.release()
+        if provider is not None:
+            try:
+                await provider.aclose()
+            except Exception as exc:
+                logger.warning("ai provider close failed job_id=%s error=%s", job_id, exc)
 
 
 async def _await_job_row(job: CrawlJob) -> int:

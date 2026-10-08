@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import AiStatusCard from "@/components/jobs/AiStatusCard";
 import JobsList from "@/components/jobs/JobsList";
 import { LoadingRow } from "@/components/StateBlocks";
 
@@ -14,6 +15,7 @@ export default function JobsPage() {
       <div className="page-head">
         <h1 className="page-title">Jobs</h1>
       </div>
+      <AiStatusCard />
       <Suspense fallback={<LoadingRow label="Loading jobs…" />}>
         <JobsList />
       </Suspense>

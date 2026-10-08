@@ -68,6 +68,7 @@ All endpoints are JSON, local-only; interactive docs at
 | `GET /api/scrape/{job_id}` | Crawl job status/progress/message |
 | `GET /api/jobs` | Job history, newest first; `status`, `limit` |
 | `POST /api/jobs/{id}/pause\|resume\|cancel` | Control a running crawl → `{job, applied}` (no-op-safe, `applied: false`) |
+| `GET /api/ai/status` | Live background-AI state → `state` (`processing\|on_hold\|idle\|unavailable\|stopped`), `reason`, `provider`, `model`, `embedding_model`, `key_present` (never the key), `retry_in_seconds`, `next_retry_at`, `last_error`, `job` (`{id, done, total, ready, failed, deferred}`, `null` before any run), `updated_at` |
 | `GET /api/settings` | Settings document: `server`, `storage`, `crawler`, `ai` (`key_present` only — never the key), `search` weights, `notices` |
 | `PATCH /api/settings` | Save partial `crawler`/`ai`/`search` changes → validated, persisted to `config/config.yaml`, applied immediately (unknown fields/sections → 422) |
 
@@ -84,7 +85,11 @@ embeddings — the semantic weight is renormalized over the rest) or
 ## Configuration
 
 Defaults live in `config/config.yaml` (storage paths, crawler limits, AI model
-names, hybrid search weights — PRD §22/§40). Resolution order:
+names, hybrid search weights — PRD §22/§40). The default AI models are
+**free OpenRouter models** (the `:free` tier): vision
+`dots-studio/dots-3-note-preview:free`, embeddings
+`nvidia/nemotron-3-embed-1b:free` — swap either via `AI_MODEL` /
+`EMBEDDING_MODEL` or by editing the YAML. Resolution order:
 
 1. Environment variables — generic `MEME_<SECTION>_<KEY>` (e.g.
    `MEME_CRAWLER_DELAY_SECONDS`, `MEME_AI_PROVIDER`) plus aliases
@@ -120,3 +125,10 @@ skips only on machines where Chromium is already present.
 
 See AGENTS.md §3. Runtime artifacts (`data/`, `logs/`) and `.env` are
 gitignored. Milestone tracking lives in `TODO.md`.
+
+
+
+
+# in short
+
+![itsMine](/hehe.webp)

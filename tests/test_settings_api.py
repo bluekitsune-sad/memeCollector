@@ -39,7 +39,12 @@ def config_copy(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def api_settings(config_copy: Path, tmp_path: Path) -> Settings:
-    """Settings pointing at the config copy + local storage + offline mock AI."""
+    """Settings pointing at the config copy + local storage + offline mock AI.
+
+    ``api_key=None`` pins the keyless state so the ``key_present`` assertions
+    hold even when a developer's ``.env.local`` carries a real key (secrets are
+    never read from YAML, and none may leak through the API).
+    """
     base = load_settings(config_copy)
     storage = replace(
         base.storage,
@@ -48,7 +53,7 @@ def api_settings(config_copy: Path, tmp_path: Path) -> Settings:
         thumbnail_directory=tmp_path / "thumbnails",
         preview_directory=tmp_path / "previews",
     )
-    return replace(base, storage=storage, ai=replace(base.ai, provider="mock"))
+    return replace(base, storage=storage, ai=replace(base.ai, provider="mock", api_key=None))
 
 
 @pytest.fixture

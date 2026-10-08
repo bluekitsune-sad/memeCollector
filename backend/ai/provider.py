@@ -10,11 +10,19 @@ this package (PRD §16, §57).
 All provider failures derive from :class:`AIProviderError` so callers can record
 them per PRD §36 without string-matching messages:
 
-* :class:`AITimeoutError` — no answer within ``settings.ai.timeout_seconds``;
+* :class:`AITimeoutError` — no answer within ``settings.ai.timeout_seconds``
+  (retryable by default);
 * :class:`AIResponseError` — the provider answered, but the JSON is malformed
   or has the wrong shape for PRD §15;
 * :class:`AIUnavailableError` — the provider is unreachable, unauthorized, or
   rejected the request (including "no API key configured").
+
+Every error carries ``retryable``: transient failures (rate limits, 5xx,
+timeouts, reasoning-only/malformed model answers) are marked
+``retryable=True`` so the queue can defer the item and try again later
+(:mod:`backend.ai.queue`), while permanent/local problems (bad API key,
+unsupported media, corrupt stored metadata) stay ``retryable=False`` and fail
+immediately.
 
 :func:`normalize_analysis` validates raw provider JSON into the exact PRD §15
 shape: missing/``None`` fields fall back to defaults with a warning log, wrong
@@ -39,11 +47,23 @@ _STRING_KEYS: tuple[str, ...] = ("description", "meme_context")
 
 
 class AIProviderError(Exception):
-    """Base class for every AI provider failure (PRD §36, §52)."""
+    """Base class for every AI provider failure (PRD §36, §52).
+
+    ``retryable`` marks failures another attempt may fix (rate limits, 5xx,
+    timeouts, a flaky model answer); the AI queue defers retryable items with
+    exponential backoff instead of failing them permanently.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class AITimeoutError(AIProviderError):
     """The provider did not answer within the configured timeout."""
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message, retryable=retryable)
 
 
 class AIResponseError(AIProviderError):

@@ -76,17 +76,28 @@ class CrawlerSettings:
 
 @dataclass(frozen=True)
 class AISettings:
-    """AI provider settings; ``api_key`` comes from the environment only."""
+    """AI provider settings; ``api_key`` comes from the environment only.
+
+    The retry fields govern the *item-level* budget of the background queue
+    (PRD §18/§36): transient failures are deferred with exponential backoff
+    (``retry_interval_seconds`` doubling up to ``retry_interval_max_seconds``)
+    until ``max_item_attempts`` is spent; ``supervisor_poll_seconds`` is the
+    idle wake interval of the AI supervisor loop.
+    """
 
     provider: str = "openrouter"
-    model: str = "openai/gpt-4o-mini"
-    embedding_model: str = "openai/text-embedding-3-small"
+    model: str = "dots-studio/dots-3-note-preview:free"
+    embedding_model: str = "nvidia/nemotron-3-embed-1b:free"
     ai_concurrency: int = 2
     api_key: str | None = None
     timeout_seconds: float = 60.0
     retry_attempts: int = 3
     retry_backoff_seconds: float = 1.0
     mock_embedding_dim: int = 384
+    max_item_attempts: int = 6
+    retry_interval_seconds: float = 15.0
+    retry_interval_max_seconds: float = 600.0
+    supervisor_poll_seconds: float = 5.0
 
 
 @dataclass(frozen=True)

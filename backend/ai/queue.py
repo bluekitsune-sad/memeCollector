@@ -9,14 +9,22 @@ transaction — never held across an ``await``)::
 
     DOWNLOADED ──▶ ANALYZING ──▶ ANALYZED ──▶ EMBEDDING ──▶ READY
          │              │             │            │
-         └──────────────┴──────▶ FAILED ◀──────────┘
+         └──────────────┴─────▶ FAILED ◀──────────┘
+              ▲               retryable failure + attempt budget spent
+              │
+              └── retry re-entry: a *retryable* provider error while the
+                  budget lasts parks the row (``ai_next_retry_at`` backoff)
+                  back at DOWNLOADED/ANALYZED instead of failing it
 
 * **claim** — rows are claimed by flipping ``DOWNLOADED``/``ANALYZED``/
   stale ``ANALYZING``/``EMBEDDING`` → ``ANALYZING``. ``ANALYZED`` and stale rows
   are the **backfill** path: they already have an ``ai_metadata`` row, so vision
   is skipped and only the embedding is (re)generated — embeddings are produced
-  for every item the provider can serve. One queue instance at a time is assumed
-  (the M5 job layer runs a single AI job), which makes status-based claiming safe.
+  for every item the provider can serve. Rows whose ``ai_next_retry_at`` is in
+  the future (deferred by a previous run) are **excluded** — they belong to the
+  next run, which the background supervisor schedules. One queue instance at a
+  time is assumed (the M5 job layer runs a single AI job, guarded by
+  ``app.state.ai_queue_running``), which makes status-based claiming safe.
 * **analysis** — image → ``analyze_image``; GIF → :func:`~backend.ai.frames.sample_frames`
   → ``analyze_gif``; ``ai_metadata`` row upserted + ``ANALYZED`` in one
   transaction.
@@ -24,13 +32,24 @@ transaction — never held across an ``await``)::
   ``embeddings`` row upserted + ``READY`` in one transaction. If ``ai_metadata``
   already exists (backfill/retry), vision is skipped and the item resumes at
   ``EMBEDDING``.
+* **retry** — a provider error flagged ``retryable`` (429/5xx/timeout,
+  reasoning-only answer, malformed model JSON) does **not** fail the item while
+  ``ai_attempts + 1 < settings.ai.max_item_attempts``: the row is bumped to
+  ``ai_attempts + 1`` and parked with
+  ``ai_next_retry_at = now + min(retry_interval_seconds * 2**attempts, retry_interval_max_seconds)``,
+  returning to ``ANALYZED`` when vision already succeeded (the retry only redoes
+  the embedding — vision tokens are not spent twice) or ``DOWNLOADED``
+  otherwise. Reaching the budget is terminal: ``FAILED`` with ``attempts=k`` in
+  the reason. Any success (``READY``) resets ``ai_attempts``/``ai_next_retry_at``.
 * **video** — download-only in the MVP (PRD §44), so videos go straight to
   ``FAILED`` with reason ``"video analysis not supported"``; they never get an
   ``ai_metadata`` row and are not claimed again (``FAILED`` is terminal for the
   queue; retry via :func:`process_single_media`).
-* **errors** — any per-item exception → ``FAILED`` + reason in the returned
-  summary, the logs, and the jobs ``message`` counters (``last_error=…``, since
-  the schema has no per-media error column); the queue keeps going (PRD §36).
+* **errors** — any per-item exception ends in ``FAILED`` + reason in the
+  returned summary, the logs, and the jobs ``message`` counters
+  (``last_error=…``, since the schema has no per-media error column); retryable
+  failures are counted as ``deferred`` instead of failed until the budget runs
+  out. The queue keeps going either way (PRD §36).
 
 **Embedding serialization** — ``embeddings.embedding`` BLOB format (documented
 for M4 readers): raw little-endian IEEE-754 **float32** bytes of the vector in
@@ -91,11 +110,16 @@ def deserialize_embedding(blob: bytes) -> np.ndarray:
 
 @dataclass(frozen=True)
 class ProcessResult:
-    """Outcome of processing exactly one media item."""
+    """Outcome of processing exactly one media item.
+
+    ``deferred`` marks a retryable failure parked for a later run (budget not
+    spent) — neither a success nor a terminal failure.
+    """
 
     media_id: int
     status: str
     error: str | None = None
+    deferred: bool = False
 
     @property
     def ok(self) -> bool:
@@ -104,7 +128,12 @@ class ProcessResult:
 
 @dataclass(frozen=True)
 class AIQueueSummary:
-    """End-of-run counters and recorded per-item failures (PRD §35/§36)."""
+    """End-of-run counters and recorded per-item failures (PRD §35/§36).
+
+    ``deferred`` counts items parked for a retry in a later run;
+    ``last_error`` is the most recent failure *or* deferral reason (the jobs
+    message and the ``/api/ai/status`` payload surface it).
+    """
 
     job_id: int
     total: int
@@ -112,6 +141,8 @@ class AIQueueSummary:
     failed: int
     cancelled: bool = False
     failures: list[str] = field(default_factory=list)
+    deferred: int = 0
+    last_error: str | None = None
 
     @property
     def done(self) -> int:
@@ -196,8 +227,8 @@ async def run_ai_queue(
         status, progress = "completed", 1.0
     _finish_job(db, job_id, status=status, message=_summary_message(summary), progress=progress)
     logger.info(
-        "ai queue finished job_id=%d status=%s total=%d ready=%d failed=%d",
-        job_id, status, summary.total, summary.ready, summary.failed,
+        "ai queue finished job_id=%d status=%s total=%d ready=%d failed=%d deferred=%d",
+        job_id, status, summary.total, summary.ready, summary.failed, summary.deferred,
     )
     return summary
 
@@ -213,7 +244,10 @@ async def process_single_media(
     Works from any status (``ANALYZING`` is re-set to mark the attempt); vision
     is skipped when ``ai_metadata`` already exists, so retrying an embedding
     failure costs no vision tokens. Raises ``ValueError`` for an unknown id;
-    media-level failures are returned as ``ProcessResult(error=…)``, never raised.
+    media-level failures are returned as ``ProcessResult(error=…)``, never
+    raised. A retryable provider failure can come back
+    ``deferred=True`` (the row returns to ``DOWNLOADED``/``ANALYZED`` for the
+    background queue); success clears ``ai_attempts``/``ai_next_retry_at``.
     """
     row = conn.execute(
         "SELECT id, file_path, mime_type, extension FROM media WHERE id = ?", (media_id,)
@@ -222,7 +256,9 @@ async def process_single_media(
         raise ValueError(f"no media row with id={media_id}")
     with transaction(conn):
         conn.execute("UPDATE media SET processing_status = 'ANALYZING' WHERE id = ?", (media_id,))
-    return await _process(conn, media_id, row["file_path"], row["mime_type"], row["extension"], provider)
+    return await _process(
+        conn, media_id, row["file_path"], row["mime_type"], row["extension"], provider, settings
+    )
 
 
 # -- worker loop -----------------------------------------------------------
@@ -235,36 +271,42 @@ async def _drain(
     controller: AIQueueController,
     job_id: int,
 ) -> AIQueueSummary:
-    total = _count_claimable(db)
-    ready = failed = 0
+    total = count_claimable(db)
+    ready = failed = deferred = 0
     failures: list[str] = []
     last_error: str | None = None
     while True:
         if controller.cancelled:
-            return AIQueueSummary(job_id, total, ready, failed, True, failures)
+            return AIQueueSummary(job_id, total, ready, failed, True, failures, deferred, last_error)
         if controller.paused:
             _update_job(db, job_id, _fraction(ready + failed, total), "paused")
             await controller.wait_while_paused()
             if controller.cancelled:
-                return AIQueueSummary(job_id, total, ready, failed, True, failures)
+                return AIQueueSummary(job_id, total, ready, failed, True, failures, deferred, last_error)
         batch = _claim_batch(db, limit=max(1, settings.ai.ai_concurrency))
         if not batch:
+            # Nothing claimable *now*: deferred rows wait for their next run
+            # (the supervisor), so this run ends instead of looping on them.
             break
         results = await asyncio.gather(
-            *(_process(db, row["id"], row["file_path"], row["mime_type"], row["extension"], provider)
+            *(_process(db, row["id"], row["file_path"], row["mime_type"], row["extension"],
+                       provider, settings)
               for row in batch)
         )
         for result in results:
             if result.ok:
                 ready += 1
+            elif result.deferred:
+                deferred += 1
+                last_error = f"media_id={result.media_id}: {result.error}"
             else:
                 failed += 1
                 failure = f"media_id={result.media_id}: {result.error}"
                 failures.append(failure)
                 last_error = failure
         _update_job(db, job_id, _fraction(ready + failed, total),
-                    _progress_message(ready + failed, total, ready, failed, last_error))
-    return AIQueueSummary(job_id, total, ready, failed, False, failures)
+                    _progress_message(ready + failed, total, ready, failed, deferred, last_error))
+    return AIQueueSummary(job_id, total, ready, failed, False, failures, deferred, last_error)
 
 
 async def _process(
@@ -274,8 +316,14 @@ async def _process(
     mime_type: str | None,
     extension: str | None,
     provider: VisionProvider,
+    settings: Settings,
 ) -> ProcessResult:
-    """Full pipeline for a row already flipped to ``ANALYZING``; never raises for item errors."""
+    """Full pipeline for a row already flipped to ``ANALYZING``; never raises for item errors.
+
+    Retryable provider failures are parked for a later run while the item's
+    ``settings.ai.max_item_attempts`` budget lasts (module docstring — retry
+    re-entry); everything else ends ``FAILED``.
+    """
     try:
         if is_video(mime_type, extension):
             logger.info("video skipped by ai queue media_id=%d", media_id)
@@ -298,6 +346,21 @@ async def _process(
         return ProcessResult(media_id, "READY")
     except AIProviderError as exc:
         reason = str(exc)
+        attempts = _load_attempts(db, media_id)
+        if exc.retryable and attempts + 1 < settings.ai.max_item_attempts:
+            delay = _retry_delay(
+                settings.ai.retry_interval_seconds,
+                attempts,
+                settings.ai.retry_interval_max_seconds,
+            )
+            _defer_item(db, media_id, delay)
+            logger.info(
+                "ai item deferred media_id=%d attempts=%d delay=%ds reason=%s",
+                media_id, attempts + 1, delay, reason,
+            )
+            return ProcessResult(media_id, "DEFERRED", error=reason, deferred=True)
+        if exc.retryable:
+            reason = f"{reason} (attempts={attempts + 1} of {settings.ai.max_item_attempts})"
         logger.warning("ai processing failed media_id=%d reason=%s", media_id, reason)
     except Exception as exc:
         reason = f"{type(exc).__name__}: {exc}"
@@ -342,10 +405,17 @@ def _validate_embedding(vector: Any) -> list[float]:
 # -- database helpers ------------------------------------------------------
 
 
-def _count_claimable(db: sqlite3.Connection) -> int:
+def count_claimable(db: sqlite3.Connection) -> int:
+    """Rows claimable *right now*: claimable status **and** not waiting on a backoff.
+
+    Shared with :class:`backend.ai.supervisor.AISupervisor`, which applies the
+    same predicate to decide whether a queue run is warranted.
+    """
     placeholders = ",".join("?" for _ in CLAIMABLE_STATUSES)
     row = db.execute(
-        f"SELECT COUNT(*) AS count FROM media WHERE processing_status IN ({placeholders})",
+        f"SELECT COUNT(*) AS count FROM media "
+        f"WHERE processing_status IN ({placeholders}) "
+        f"AND (ai_next_retry_at IS NULL OR ai_next_retry_at <= datetime('now'))",
         CLAIMABLE_STATUSES,
     ).fetchone()
     return int(row["count"])
@@ -357,7 +427,9 @@ def _claim_batch(db: sqlite3.Connection, *, limit: int) -> list[sqlite3.Row]:
     with transaction(db):
         rows = db.execute(
             f"SELECT id, file_path, mime_type, extension FROM media "
-            f"WHERE processing_status IN ({placeholders}) ORDER BY id LIMIT ?",
+            f"WHERE processing_status IN ({placeholders}) "
+            f"AND (ai_next_retry_at IS NULL OR ai_next_retry_at <= datetime('now')) "
+            f"ORDER BY id LIMIT ?",
             (*CLAIMABLE_STATUSES, limit),
         ).fetchall()
         if not rows:
@@ -394,6 +466,37 @@ def _set_status(db: sqlite3.Connection, media_id: int, status: str) -> None:
         db.execute("UPDATE media SET processing_status = ? WHERE id = ?", (status, media_id))
 
 
+def _load_attempts(db: sqlite3.Connection, media_id: int) -> int:
+    """Spent retry budget of one item (0 when the row vanished — upstream guards it)."""
+    row = db.execute("SELECT ai_attempts FROM media WHERE id = ?", (media_id,)).fetchone()
+    return int(row["ai_attempts"]) if row is not None else 0
+
+
+def _retry_delay(base_seconds: float, attempts: int, max_seconds: float) -> int:
+    """Whole-second backoff for retry ``attempts`` (0-based): base doubling, capped.
+
+    Never below 1s so a deferred row always lands in the *next* run instead of
+    being re-claimed by the drain loop that parked it.
+    """
+    delay = min(max(0.0, base_seconds) * (2**attempts), max(0.0, max_seconds))
+    return max(1, int(round(delay)))
+
+
+def _defer_item(db: sqlite3.Connection, media_id: int, delay_seconds: int) -> None:
+    """Park a retryable failure: bump the budget, set ``ai_next_retry_at``, restore
+    a claimable status — ``ANALYZED`` when vision already produced an
+    ``ai_metadata`` row (the retry only redoes the embedding), else ``DOWNLOADED``.
+    """
+    status = "ANALYZED" if _has_analysis(db, media_id) else "DOWNLOADED"
+    with transaction(db):
+        db.execute(
+            "UPDATE media SET ai_attempts = ai_attempts + 1, "
+            "ai_next_retry_at = datetime('now', '+' || ? || ' seconds'), "
+            "processing_status = ? WHERE id = ?",
+            (delay_seconds, status, media_id),
+        )
+
+
 def _store_analysis(
     db: sqlite3.Connection,
     media_id: int,
@@ -428,14 +531,22 @@ def _store_embedding(
     vector: list[float],
     embedding_model: str,
 ) -> None:
-    """Persist the embedding BLOB and flip ``EMBEDDING → READY`` in one transaction."""
+    """Persist the embedding BLOB and flip ``EMBEDDING → READY`` in one transaction.
+
+    ``READY`` also clears the retry budget (``ai_attempts``/``ai_next_retry_at``)
+    so a future manual reanalyze starts from a clean slate.
+    """
     blob = serialize_embedding(_validate_embedding(vector))
     with transaction(db):
         db.execute(
             "INSERT OR REPLACE INTO embeddings (media_id, embedding, embedding_model) VALUES (?, ?, ?)",
             (media_id, blob, embedding_model),
         )
-        db.execute("UPDATE media SET processing_status = 'READY' WHERE id = ?", (media_id,))
+        db.execute(
+            "UPDATE media SET processing_status = 'READY', "
+            "ai_attempts = 0, ai_next_retry_at = NULL WHERE id = ?",
+            (media_id,),
+        )
 
 
 # -- jobs telemetry --------------------------------------------------------
@@ -488,17 +599,22 @@ def _fraction(done: int, total: int) -> float:
     return done / total if total > 0 else 0.0
 
 
-def _progress_message(done: int, total: int, ready: int, failed: int, last_error: str | None) -> str:
-    message = f"done={done}/{total} ready={ready} failed={failed}"
+def _progress_message(
+    done: int, total: int, ready: int, failed: int, deferred: int, last_error: str | None
+) -> str:
+    message = f"done={done}/{total} ready={ready} failed={failed} deferred={deferred}"
     if last_error is not None:
         message += f" last_error={last_error[:200]}"
     return message
 
 
 def _summary_message(summary: AIQueueSummary) -> str:
-    message = f"done={summary.done}/{summary.total} ready={summary.ready} failed={summary.failed}"
+    message = (
+        f"done={summary.done}/{summary.total} ready={summary.ready} "
+        f"failed={summary.failed} deferred={summary.deferred}"
+    )
     if summary.cancelled:
         message += " cancelled"
-    if summary.failures:
-        message += f" last_error={summary.failures[-1][:200]}"
+    if summary.last_error:
+        message += f" last_error={summary.last_error[:200]}"
     return message

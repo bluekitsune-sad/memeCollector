@@ -187,6 +187,41 @@ export interface JobActionResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Background AI status (routes_ai.py — GET /api/ai/status)
+// ---------------------------------------------------------------------------
+
+/** Supervisor loop states behind the live AI card (PRD §18). */
+export type AiStatusState = "processing" | "on_hold" | "idle" | "unavailable" | "stopped";
+
+/** Counters of the newest `ai_analysis` job (`null` before any run). */
+export interface AiJobStatus {
+  id: number;
+  done: number;
+  total: number;
+  ready: number;
+  failed: number;
+  deferred: number;
+}
+
+/** Live background-analysis state (PRD §35) — never carries the API key. */
+export interface AiStatus {
+  state: AiStatusState;
+  /** Populated only in the `unavailable` state (why the provider cannot be built). */
+  reason: string | null;
+  provider: string;
+  model: string;
+  embedding_model: string;
+  /** Whether an API key is configured — the key itself is never sent (PRD §41). */
+  key_present: boolean;
+  /** Seconds until deferred items are retried (live countdown in `on_hold`). */
+  retry_in_seconds: number | null;
+  next_retry_at: string | null;
+  last_error: string | null;
+  job: AiJobStatus | null;
+  updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Search (GET /api/search — documented contract)
 // ---------------------------------------------------------------------------
 

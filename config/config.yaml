@@ -26,13 +26,21 @@ crawler:
 
 ai:
   provider: openrouter       # OpenAI-compatible chat-completions with vision (PRD §0)
-  model: openai/gpt-4o-mini
-  embedding_model: openai/text-embedding-3-small
+  # Free OpenRouter models (":free" suffix) — no cost, rate-limited tier (PRD §0).
+  # Vision must accept image input; embedding model dims define the semantic index.
+  model: dots-studio/dots-3-note-preview:free
+  embedding_model: nvidia/nemotron-3-embed-1b:free
   ai_concurrency: 2          # items processed in parallel by the AI queue (PRD §37)
   timeout_seconds: 60.0      # per-request OpenRouter HTTP timeout
   retry_attempts: 3          # HTTP attempts for 429/5xx/timeouts, exponential backoff
   retry_backoff_seconds: 1.0 # backoff base: 1s, 2s, 4s, … (capped)
   mock_embedding_dim: 384    # mock provider vector size (offline/demo mode, no key needed)
+  # Background retry of transient per-item failures (PRD §36 — a failed item
+  # never stops the queue, and rate-limited items come back on their own).
+  max_item_attempts: 6              # per-item budget before the item fails for good
+  retry_interval_seconds: 15.0      # backoff base: 15s, 30s, 60s, 120s, …
+  retry_interval_max_seconds: 600.0 # backoff cap (10 min)
+  supervisor_poll_seconds: 5.0      # AI supervisor idle wake interval
 
 search:
   # Hybrid ranking weights (PRD §22):

@@ -7,6 +7,7 @@
  */
 
 import type {
+  AiStatus,
   Job,
   JobActionResponse,
   JobListResponse,
@@ -163,6 +164,13 @@ export function listJobs(params: { status?: string; limit?: number } = {}): Prom
 
 export function jobAction(jobId: number, action: "pause" | "resume" | "cancel"): Promise<JobActionResponse> {
   return request<JobActionResponse>(`/api/jobs/${jobId}/${action}`, jsonInit("POST"));
+}
+
+// --- Background AI ---------------------------------------------------------
+
+/** Live state of the background AI supervisor (`processing`/`on_hold`/`idle`/…). */
+export function getAiStatus(): Promise<AiStatus> {
+  return request<AiStatus>("/api/ai/status");
 }
 
 // --- Search ----------------------------------------------------------------

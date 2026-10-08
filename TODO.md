@@ -75,6 +75,7 @@ Legend: `[ ]` pending · `[~]` in progress · `[x]` done & verified · `[!]` blo
 
 ## Change log
 
+- 2026-10-08: **Resilient background AI** — free OpenRouter models as defaults (dots-3-note-preview:free vision, nemotron-3-embed-1b:free embeddings, benchmarked live); per-item retry with exponential backoff (`ai_attempts`/`ai_next_retry_at`, migration 003) so 429/5xx/timeouts/malformed responses defer instead of failing terminally; `AISupervisor` background loop (startup recovery, on_hold/idle/unavailable states, shared queue gate with the scrape pipeline, FTS reindex after runs); `GET /api/ai/status` + live AiStatusCard on the Jobs page; fixed a race in the status-API on_hold test. 410 passed + 1 skip; tsc/build green.
 - 2026-10-07: Backend wave (search/settings/AI-wiring) landed after one rate-limited attempt — M4 + M5.1/5.4/5.5/5.6 complete; faiss-cpu 1.15.1 adopted on Python 3.14. Live collector demo (asurascans ch.1) + mock AI over 27 real items + hybrid search verified end-to-end. Frontend deps reinstalled (node_modules was missing), production build re-verified.
 - 2026-10-08: `.env.local` support — loader now reads `.env.local` then `.env` (real env > `.env.local` > `.env` > YAML); created `.env.local` (gitignored) for the OpenRouter key. Verified: full suite green with a key present.
 - 2026-10-08: Created tracker from PRD v1.1 (added §0 decisions, §12.1 dup lifecycle, 4 target sites, OpenRouter, Next.js).

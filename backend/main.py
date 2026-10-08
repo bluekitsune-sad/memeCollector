@@ -1,7 +1,9 @@
 """FastAPI application entry point for MemeVault.
 
-Startup applies pending database migrations and exposes the route modules
-(media / scraper / jobs / search). CORS allows the Next.js dev server on
+Startup applies pending database migrations, spawns the background
+:class:`backend.ai.supervisor.AISupervisor` task (resilient AI analysis with a
+live ``GET /api/ai/status`` surface), and exposes the route modules
+(ai / media / scraper / jobs / search). CORS allows the Next.js dev server on
 localhost:3000 (PRD §0 frontend decision); the server itself keeps the
 localhost-only binding from config — run from the project root:
 
@@ -10,14 +12,18 @@ localhost-only binding from config — run from the project root:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from functools import partial
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.ai.runner import AIQueueGate
+from backend.ai.supervisor import AISupervisor
+from backend.api.routes_ai import router as ai_router
 from backend.api.routes_jobs import router as jobs_router
 from backend.api.routes_media import router as media_router
 from backend.api.routes_scraper import router as scraper_router
@@ -41,12 +47,23 @@ async def _lifespan(app: FastAPI, settings: Settings | None) -> AsyncIterator[No
     app.state.settings = resolved
     # Live CrawlJob handles for /api/jobs pause/resume/cancel (job_id → CrawlJob).
     app.state.running_crawls = {}
-    # Concurrency guard for the scrape pipeline's AI stage (one queue at a time).
+    # Concurrency guard for the AI queue (one run at a time) — shared by the
+    # scrape pipeline's AI stage and the background supervisor (backend/ai/runner.py).
     app.state.ai_queue_running = False
+    supervisor = AISupervisor(connection, resolved, AIQueueGate(app.state))
+    app.state.ai_supervisor = supervisor
+    # Wake channel for the supervisor: setting this event == calling supervisor.nudge().
+    app.state.ai_nudge = supervisor.wake_event
+    ai_task = asyncio.create_task(supervisor.run())
+    app.state.ai_task = ai_task
     logger.info("application starting db=%s", resolved.storage.database_path)
     try:
         yield
     finally:
+        await supervisor.stop()
+        ai_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await ai_task
         connection.close()
 
 
@@ -71,12 +88,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.include_router(ai_router)
     app.include_router(media_router)
     app.include_router(scraper_router)
     app.include_router(jobs_router)
     app.include_router(search_router)
     app.include_router(settings_router)
-    logger.info("routes registered media scraper jobs search settings")
+    logger.info("routes registered ai media scraper jobs search settings")
     return app
 
 
