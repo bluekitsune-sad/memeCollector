@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sample Comic — Chapter Listing — Fixture Site</title>
+</head>
+<body>
+  <header class="site-header">
+    <a class="site-logo" href="/"><img src="/assets/logo.png" alt="Site logo"></a>
+  </header>
+
+  <main>
+    <h1>Sample Comic</h1>
+    <!-- Only a.chapter-link entries drive ENTIRE_COMIC discovery; page counts come from data-pages. -->
+    <ul class="chapter-list">
+      <li><a class="chapter-link" href="/comic/sample/chapter-41" data-pages="2">Chapter 41</a></li>
+      <li><a class="chapter-link" href="/comic/sample/chapter-42" data-pages="3">Chapter 42</a></li>
+      <li><a class="chapter-link" href="/comic/sample/chapter-43" data-pages="1">Chapter 43</a></li>
+      <!-- Decoys an adapter must ignore: no chapter-link class. -->
+      <li><a href="/comic/sample">Overview</a></li>
+      <li><a class="external-link" href="https://other.example/">Elsewhere</a></li>
+    </ul>
+
+    <div class="pagination">
+      <a class="page-next" href="?page=2">Next</a>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <img class="ad-banner" src="/assets/footer-ad.png" alt="Advertisement">
+  </footer>
+</body>
+</html>

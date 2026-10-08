@@ -1,0 +1,43 @@
+# MemeVault default configuration (PRD §40).
+# Environment variables override these values: MEME_<SECTION>_<KEY>
+# (e.g. MEME_CRAWLER_CONCURRENCY=1), plus the aliases documented in .env.example.
+# Secrets are never stored here — the AI API key is read from OPENROUTER_API_KEY in .env only.
+
+server:
+  host: 127.0.0.1            # localhost only, no public exposure (PRD §41)
+  port: 8000
+
+storage:
+  media_directory: ./data/media
+  thumbnail_directory: ./data/thumbnails
+  preview_directory: ./data/previews
+  database_path: ./data/database.sqlite
+
+crawler:
+  delay_seconds: 1.0         # >= 1s between pages (AGENTS.md §9); also the backoff base
+  concurrency: 2             # <= 2 by default (AGENTS.md §9)
+  max_pages: 100
+  download_limit: 500        # files per crawl
+  max_file_size_mb: 100
+  headless: true             # false = show the browser
+  debug: false               # debug flag for headed debugging sessions
+  retry_attempts: 3          # HTTP attempts per page fetch / download (429/5xx retried, PRD §37)
+  request_timeout_seconds: 30.0
+
+ai:
+  provider: openrouter       # OpenAI-compatible chat-completions with vision (PRD §0)
+  model: openai/gpt-4o-mini
+  embedding_model: openai/text-embedding-3-small
+  ai_concurrency: 2          # items processed in parallel by the AI queue (PRD §37)
+  timeout_seconds: 60.0      # per-request OpenRouter HTTP timeout
+  retry_attempts: 3          # HTTP attempts for 429/5xx/timeouts, exponential backoff
+  retry_backoff_seconds: 1.0 # backoff base: 1s, 2s, 4s, … (capped)
+  mock_embedding_dim: 384    # mock provider vector size (offline/demo mode, no key needed)
+
+search:
+  # Hybrid ranking weights (PRD §22):
+  # 0.25 keyword + 0.50 semantic + 0.20 tag + 0.05 metadata = 1.00
+  keyword_weight: 0.25
+  semantic_weight: 0.50
+  tag_weight: 0.20
+  metadata_weight: 0.05

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Heavy Chrome — Fixture Site</title>
+</head>
+<body>
+  <!-- Everything in this fixture marked "chrome" must NEVER be collected (PRD §6, AGENTS.md §6). -->
+  <header class="site-header">
+    <a class="site-logo" href="/"><img src="/assets/logo.png" alt="Site logo"></a>
+    <nav class="main-nav">
+      <img class="nav-icon" src="/assets/nav-icon.png" alt="">
+      <a href="/comics">Comics</a>
+      <a href="/latest">Latest</a>
+    </nav>
+    <img class="search-icon" src="/assets/search.png" alt="">
+  </header>
+
+  <aside class="sidebar">
+    <img class="trending lazy" data-src="/assets/sidebar-trending.png" src="/assets/grey.gif" alt="Trending">
+    <a href="/comic/related-one"><img src="/assets/related-1.png" alt="Related comic"></a>
+  </aside>
+
+  <main>
+    <section class="comic">
+      <h1>Sample Comic — Chapter 42</h1>
+      <img class="comic-panel" src="/uploads/comics/ch42/panel-1.png" alt="Comic panel 1">
+      <img class="comic-panel" src="/uploads/comics/ch42/panel-2.png" alt="Comic panel 2">
+      <div class="pagination">
+        <a class="page-prev" href="?page=16">Previous</a>
+        <a class="page-next" href="?page=18">Next</a>
+      </div>
+    </section>
+
+    <!-- Comment attachments only: image, GIF, MP4 video, relative attachment, WebM video. -->
+    <section class="comments" id="comments">
+      <article class="comment" data-comment-id="919001">
+        <img class="avatar" src="/avatars/user_a.png" alt="Avatar">
+        <span class="author">meme_lord</span>
+        <time class="comment-date" datetime="2026-10-03T11:00:00Z">Oct 3, 2026</time>
+        <p class="comment-text">Absolute state of him 😂</p>
+        <img class="attachment" src="https://cdn.example.com/media/heavy-one.png" alt="Attached image">
+      </article>
+
+      <article class="comment" data-comment-id="919002">
+        <img class="avatar" src="/avatars/user_b.png" alt="Avatar">
+        <span class="author">gigachad_enjoyer</span>
+        <p class="comment-text">When the plot twist hits</p>
+        <img class="attachment" src="https://cdn.example.com/media/heavy-two.gif" alt="Attached GIF">
+      </article>
+
+      <article class="comment" data-comment-id="919003">
+        <img class="avatar" src="/avatars/user_c.png" alt="Avatar">
+        <span class="author">video_guy</span>
+        <p class="comment-text">watch this reaction clip</p>
+        <video class="attachment" src="https://cdn.example.com/media/heavy-clip.mp4" controls></video>
+      </article>
+
+      <article class="comment" data-comment-id="919004">
+        <img class="avatar" src="/avatars/user_d.png" alt="Avatar">
+        <span class="author">sticker_person</span>
+        <p class="comment-text">have a sticker + a classic</p>
+        <a class="attachment" href="/uploads/comments/rel-sticker.png">free sticker</a>
+        <a class="attachment" href="https://cdn.example.com/media/eye-roll.webm">webm</a>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <img class="ad-banner" src="/assets/footer-ad.png" alt="Advertisement">
+  </footer>
+</body>
+</html>

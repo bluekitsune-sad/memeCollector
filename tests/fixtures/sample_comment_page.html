@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sample Comic — Chapter 42 :: Fixture Site</title>
+</head>
+<body>
+  <!-- Page chrome: none of this is comment media and none of it may be downloaded. -->
+  <header class="site-header">
+    <a class="site-logo" href="/"><img src="/assets/logo.png" alt="Site logo"></a>
+    <nav class="main-nav">
+      <a href="/comics">Comics</a>
+      <a href="/latest">Latest</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="comic">
+      <h1>Sample Comic — Chapter 42</h1>
+      <img class="comic-panel" src="/uploads/comics/ch42/page-17.png" alt="Comic panel">
+      <div class="pagination">
+        <a class="page-prev" href="?page=16">Previous</a>
+        <a class="page-next" href="?page=18">Next</a>
+      </div>
+    </section>
+
+    <!-- Comment section: attachments inside comments ARE comment media. -->
+    <section class="comments" id="comments">
+      <article class="comment" data-comment-id="918271">
+        <img class="avatar" src="/avatars/reader_one.png" alt="Avatar">
+        <span class="author">reader_one</span>
+        <time class="comment-date" datetime="2026-10-01T12:00:00Z">Oct 1, 2026</time>
+        <p class="comment-text">This chapter is gold 😂</p>
+        <a class="attachment" href="https://cdn.example.com/media/confused-cat.png">
+          <img src="https://cdn.example.com/media/confused-cat.png" alt="Attached image">
+        </a>
+      </article>
+
+      <article class="comment" data-comment-id="918273">
+        <img class="avatar" src="/avatars/reader_two.png" alt="Avatar">
+        <span class="author">reader_two</span>
+        <time class="comment-date" datetime="2026-10-02T09:30:00Z">Oct 2, 2026</time>
+        <p class="comment-text">When the MC finally realizes he screwed up...</p>
+        <a class="attachment" href="https://cdn.example.com/media/turn-around.gif">
+          <img src="https://cdn.example.com/media/turn-around.gif" alt="Attached GIF">
+        </a>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <img class="ad-banner" src="/assets/ad-banner.png" alt="Advertisement">
+  </footer>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Runtime artifacts (never commit)
+data/
+logs/
+
+# Secrets
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

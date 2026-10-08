@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Lazy-loaded Comments — Fixture Site</title>
+</head>
+<body>
+  <header class="site-header">
+    <img class="logo" src="/assets/logo.png" alt="Site logo">
+  </header>
+
+  <!-- Chrome lazy image: never collected (it is outside any comment). -->
+  <aside class="sidebar">
+    <img class="trending lazy" data-src="/assets/chrome-lazy.png" src="/assets/blank.gif" alt="Trending">
+  </aside>
+
+  <main>
+    <section class="comments" id="comments">
+      <!-- data-src wins over a data: placeholder in src. -->
+      <article class="comment" data-comment-id="920001">
+        <img class="avatar" src="/avatars/user_e.png" alt="Avatar">
+        <span class="author">slow_connection</span>
+        <p class="comment-text">loading…</p>
+        <img class="attachment lazy"
+             src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+             data-src="https://cdn.example.com/media/late-load.gif"
+             alt="Attached GIF">
+      </article>
+
+      <!-- data-original wins over the placeholder src. -->
+      <article class="comment" data-comment-id="920002">
+        <img class="avatar" src="/avatars/user_f.png" alt="Avatar">
+        <span class="author">old_school</span>
+        <p class="comment-text">the classic data-original trick</p>
+        <img class="attachment lazy"
+             src="/assets/placeholder.png"
+             data-original="https://cdn.example.com/media/orig.png"
+             alt="Attached image">
+      </article>
+
+      <!-- srcset: first candidate is the media URL. -->
+      <article class="comment" data-comment-id="920003">
+        <img class="avatar" src="/avatars/user_g.png" alt="Avatar">
+        <span class="author">responsive_andy</span>
+        <p class="comment-text">responsive attachment</p>
+        <img class="attachment"
+             srcset="https://cdn.example.com/media/small.jpg 1x, https://cdn.example.com/media/big.jpg 2x"
+             src="/assets/blank.gif"
+             alt="Attached image">
+      </article>
+    </section>
+  </main>
+</body>
+</html>
