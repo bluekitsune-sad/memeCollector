@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 
 from backend.security.text import sanitize_text
 
-logger = logging.getLogger("memevault.security.urls")
+logger = logging.getLogger("memecollector.security.urls")
 
 ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
 MAX_REDIRECTS = 10

@@ -34,4 +34,4 @@ def test_app_factory_builds() -> None:
     from backend.main import create_app
 
     app = create_app()
-    assert app.title == "MemeVault"
+    assert app.title == "MemeCollector"

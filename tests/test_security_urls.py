@@ -167,7 +167,7 @@ async def test_ensure_safe_url_allows_public_target(monkeypatch: pytest.MonkeyPa
 
 
 def test_reject_url_logs_structured_key_value(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.WARNING, logger="memevault.security.urls")
+    caplog.set_level(logging.WARNING, logger="memecollector.security.urls")
     hostile_url = "https://bad.example/\x07steal"
     with pytest.raises(UnsafeURLError):
         reject_url(hostile_url, "test reason")

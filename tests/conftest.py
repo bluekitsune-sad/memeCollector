@@ -39,7 +39,7 @@ def fixtures_dir() -> Path:
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
     """Path for a fresh, throwaway SQLite database inside the test's tmp dir."""
-    return tmp_path / "memevault_test.sqlite"
+    return tmp_path / "memecollector_test.sqlite"
 
 
 @pytest.fixture

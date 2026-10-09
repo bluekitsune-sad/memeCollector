@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "MemeVault",
-    template: "%s · MemeVault",
+    default: "MemeCollector",
+    template: "%s · MemeCollector",
   },
   description:
     "Local-first archive of memes collected from comic comment sections — searchable by keyword and meaning.",

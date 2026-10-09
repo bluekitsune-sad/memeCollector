@@ -40,11 +40,11 @@ export default function SettingsInfo({ settings }: { settings: SettingsResponse 
         <p className="notice">
           {settings.notices?.copyright ??
             "You are responsible for ensuring your collection and use of this media complies with " +
-              "the source sites' terms and applicable copyright law. MemeVault keeps source " +
+              "the source sites' terms and applicable copyright law. MemeCollector keeps source " +
               "attribution and is intended for personal archival use only."}
         </p>
         <p className="inline-msg" style={{ marginTop: 8 }}>
-          MemeVault is a personal archival tool: it keeps source attribution for everything it
+          MemeCollector is a personal archival tool: it keeps source attribution for everything it
           collects and never redistributes content automatically.
         </p>
       </section>

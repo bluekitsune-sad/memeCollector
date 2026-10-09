@@ -8,7 +8,7 @@ This file contains binding instructions for anyone (human or AI) working on this
 
 ## 1. Project Overview
 
-Meme Comment Archive ("MemeVault") — a local-first application that collects image/GIF/video media from the comment sections of supported comic sites, deduplicates it, generates thumbnails, analyzes it with AI (descriptions/tags), and makes it searchable via keyword (SQLite FTS5) and semantic (vector embedding) search.
+Meme Comment Archive ("MemeCollector") — a local-first application that collects image/GIF/video media from the comment sections of supported comic sites, deduplicates it, generates thumbnails, analyzes it with AI (descriptions/tags), and makes it searchable via keyword (SQLite FTS5) and semantic (vector embedding) search.
 
 Architecture principle (PRD §57): **separate COLLECT → STORE → PROCESS → INDEX → SEARCH.** Never merge these stages into one script.
 

@@ -61,7 +61,7 @@ Legend: `[ ]` pending · `[~]` in progress · `[x]` done & verified · `[!]` blo
 - [x] M5.2 Jobs UI panel (live progress) — frontend JobsList/JobCard/JobControls/ProgressBar/ScanCounters, auto-polling
 - [x] M5.3 Add Source flow in UI (URL → supported/unsupported feedback → scope selection → start scan + live counters per PRD §5.2) — AddSourceForm + JobProgressView (key=value counter parsing, progress bar, pause/resume/cancel); unsupported site → 400 detail shown verbatim (PRD §0)
 - [x] M5.4 Settings page (crawl limits, AI provider/key indicator, storage paths, cloud-AI privacy notice + copyright notice per PRD §43) — `api/routes_settings.py` (GET/PATCH, key_present only — key never exposed, weight-sum 422, YAML round-trip allowlist) + SettingsForm; live-verified GET via UI
-- [x] M5.5 Structured logging to `logs/` — `backend/logging_config.py`: console + rotating logs/memevault.log (2 MiB × 4 files, secret redaction), idempotent, MEME_LOG_LEVEL, PRD §53 format
+- [x] M5.5 Structured logging to `logs/` — `backend/logging_config.py`: console + rotating logs/memecollector.log (2 MiB × 4 files, secret redaction), idempotent, MEME_LOG_LEVEL, PRD §53 format
 - [x] M5.6 README: setup, run, config, troubleshooting — backend+frontend run docs, mock/offline mode, API table incl. /api/search, /api/settings, reanalyze, .env.local
 
 ## Milestone 6 — Resilience wave (backfill, auto-resume, revive) — COMPLETE

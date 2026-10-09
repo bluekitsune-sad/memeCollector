@@ -4,7 +4,7 @@
 logger — the parent of every module logger in this codebase:
 
 * a **console** handler on stderr, so records sit next to uvicorn's own output;
-* a **rotating file** handler (``logs/memevault.log``, 2 MiB × 4 files,
+* a **rotating file** handler (``logs/memecollector.log``, 2 MiB × 4 files,
   gitignored per AGENTS.md §10), created lazily so importing the app never
   touches the disk.
 
@@ -48,7 +48,7 @@ from backend.config.loader import PROJECT_ROOT
 LOG_DIRECTORY: Path = PROJECT_ROOT / "logs"
 
 #: Rotating file name and size policy.
-LOG_FILE_NAME = "memevault.log"
+LOG_FILE_NAME = "memecollector.log"
 MAX_BYTES = 2 * 1024 * 1024
 BACKUP_COUNT = 3
 
@@ -69,7 +69,7 @@ REDACTED_PLACEHOLDER = "[redacted]"
 
 _FORMAT = "%(asctime)s %(levelname)-5s %(name)s: %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-_MARKER = "_memevault_logging_configured"
+_MARKER = "_memecollector_logging_configured"
 
 
 def resolve_level(level: str | int | None = None) -> int:

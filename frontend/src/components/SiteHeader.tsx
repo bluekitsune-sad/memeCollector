@@ -43,11 +43,11 @@ export default function SiteHeader() {
 
   return (
     <header className="app-header">
-      <Link href="/" className="brand" aria-label="MemeVault home">
+      <Link href="/" className="brand" aria-label="MemeCollector home">
         <span className="brand-mark" aria-hidden="true">
           <PixelMark />
         </span>
-        MemeVault
+        MemeCollector
       </Link>
 
       <nav className="nav" aria-label="Main">

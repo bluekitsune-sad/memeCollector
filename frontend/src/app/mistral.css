@@ -1,5 +1,5 @@
 /* =============================================================================
-   mistral.css — Mistral-AI-inspired global skin for MemeVault (dark only).
+   mistral.css — Mistral-AI-inspired global skin for MemeCollector (dark only).
    Imported AFTER globals.css (see layout.tsx) so every rule here wins the
    cascade over the legacy theme. There is exactly one palette: a near-black
    background with off-white type and the #ff4f00 orange accent.

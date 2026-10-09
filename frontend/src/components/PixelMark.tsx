@@ -1,5 +1,5 @@
 /**
- * 16×16 pixel-art vault mark for MemeVault (theme flourish).
+ * 16×16 pixel-art vault mark for MemeCollector (theme flourish).
  * `shape-rendering="crispEdges"` keeps every rect hard-edged at any size;
  * the brand box scales it ×2 (32px) so each art pixel lands on 2 screen px.
  */

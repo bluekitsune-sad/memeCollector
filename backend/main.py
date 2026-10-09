@@ -1,4 +1,4 @@
-"""FastAPI application entry point for MemeVault.
+"""FastAPI application entry point for MemeCollector.
 
 Startup applies pending database migrations, fails any ``jobs`` row stranded
 ``running`` by a previous process (:mod:`backend.jobs.recovery`) and then
@@ -142,7 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """
     configure_logging()
     app = FastAPI(
-        title="MemeVault",
+        title="MemeCollector",
         version="0.1.0",
         lifespan=partial(_lifespan, settings=settings),
     )
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     _settings = load_settings()
     if _settings.server.host not in ("127.0.0.1", "localhost", "::1"):
         logger.warning(
-            "binding to a non-loopback address host=%s — MemeVault is a local-first "
+            "binding to a non-loopback address host=%s — MemeCollector is a local-first "
             "tool and must not be exposed publicly (PRD §41)",
             _settings.server.host,
         )

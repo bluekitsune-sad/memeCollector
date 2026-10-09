@@ -1,4 +1,4 @@
-# MemeVault — Meme Comment Archive
+# MemeCollector — Meme Comment Archive
 
 Chief Meme Officer (CMO) or Meme Specialist
 
@@ -148,7 +148,7 @@ settings API exposes it as a boolean (`key_present`) alone.
 ## Logging
 
 Structured `key=value` logs (PRD §53) from every backend module go to the
-console and to a rotating `logs/memevault.log` (2 MiB × 4 files, gitignored).
+console and to a rotating `logs/memecollector.log` (2 MiB × 4 files, gitignored).
 The level defaults to `INFO`; override it with `MEME_LOG_LEVEL=DEBUG`.
 
 ## Tests

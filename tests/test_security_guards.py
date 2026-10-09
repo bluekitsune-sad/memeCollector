@@ -33,7 +33,7 @@ from backend.security.fetch import guarded_get
 from backend.security.urls import MAX_REDIRECTS, UnsafeURLError
 from tests.test_downloader import CDN, make_client, media_ref
 
-GUARD_LOGGER = "memevault.security.urls"
+GUARD_LOGGER = "memecollector.security.urls"
 
 
 @pytest.fixture(autouse=True)

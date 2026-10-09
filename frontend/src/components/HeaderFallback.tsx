@@ -11,7 +11,7 @@ export default function HeaderFallback() {
         <span className="brand-mark" aria-hidden="true">
           <PixelMark />
         </span>
-        MemeVault
+        MemeCollector
       </span>
     </header>
   );

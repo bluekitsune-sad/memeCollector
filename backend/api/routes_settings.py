@@ -47,7 +47,7 @@ SUPPORTED_PROVIDERS: tuple[str, ...] = ("mock", "openrouter")
 
 #: PRD §42 — shown whenever analysis is sent to an external provider.
 PRIVACY_NOTICE = (
-    "MemeVault is local-first: media, database, search and embeddings stay on this machine. "
+    "MemeCollector is local-first: media, database, search and embeddings stay on this machine. "
     "When an external AI provider is configured, the selected media is sent to that provider "
     "for analysis and the returned description/tags are stored in the local database."
 )
@@ -55,7 +55,7 @@ PRIVACY_NOTICE = (
 #: PRD §43 — shown read-only in Settings.
 COPYRIGHT_NOTICE = (
     "You are responsible for ensuring your collection and use of this media complies with the "
-    "source sites' terms and applicable copyright law. MemeVault keeps source attribution, uses "
+    "source sites' terms and applicable copyright law. MemeCollector keeps source attribution, uses "
     "reasonable crawl rates and never redistributes collected content automatically — it is "
     "intended for personal archival use only."
 )

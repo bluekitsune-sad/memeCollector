@@ -1,4 +1,4 @@
-# MemeVault backend dependencies (Python 3.14).
+# MemeCollector backend dependencies (Python 3.14).
 # Version floors only — pip resolves the latest compatible releases.
 
 # Web backend

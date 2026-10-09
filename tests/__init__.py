@@ -1,1 +1,1 @@
-"""MemeVault test suite (pytest)."""
+"""MemeCollector test suite (pytest)."""

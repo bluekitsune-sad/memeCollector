@@ -5,7 +5,7 @@ import { GridSkeleton } from "@/components/StateBlocks";
 
 export const metadata: Metadata = {
   title: "Gallery",
-  description: "Browse, filter and paginate the MemeVault archive.",
+  description: "Browse, filter and paginate the MemeCollector archive.",
 };
 
 export default function GalleryPage() {

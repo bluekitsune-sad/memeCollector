@@ -1,4 +1,4 @@
-"""Configuration loading for MemeVault.
+"""Configuration loading for MemeCollector.
 
 Resolution order (highest priority first):
 
