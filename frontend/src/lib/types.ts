@@ -318,3 +318,61 @@ export interface SettingsPatch {
   ai?: Partial<Pick<AiSettings, "provider" | "model" | "embedding_model">>;
   search?: Partial<SearchSettings>;
 }
+
+// ---------------------------------------------------------------------------
+// Site-wide backfill (routes_backfill.py — GET/POST /api/backfill)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle of a site-wide backfill run. */
+export type BackfillStatus = "running" | "completed" | "cancelled" | "failed";
+
+/** Per-comic state inside one backfill run. */
+export type BackfillItemStatus = "pending" | "running" | "done" | "failed";
+
+/** One backfill run summary (`BackfillOut`). */
+export interface BackfillOut {
+  id: number;
+  site_url: string;
+  adapter_site: string;
+  status: BackfillStatus;
+  total: number;
+  done: number;
+  failed: number;
+  current_url: string | null;
+  current_title: string | null;
+  message: string | null;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
+  /** True while the worker process is actively driving this run. */
+  live: boolean;
+}
+
+/** Run summary plus per-status item counts (`BackfillDetailOut`). */
+export interface BackfillDetailOut extends BackfillOut {
+  counts: { pending: number; running: number; done: number; failed: number };
+}
+
+/** One comic queued in a backfill run (`BackfillItemOut`). */
+export interface BackfillItemOut {
+  id: number;
+  url: string;
+  title: string | null;
+  status: BackfillItemStatus;
+  error: string | null;
+  finished_at: string | null;
+}
+
+export interface BackfillListResponse {
+  items: BackfillOut[];
+}
+
+export interface BackfillItemsResponse {
+  items: BackfillItemOut[];
+  total: number;
+}
+
+export interface BackfillActionResponse {
+  backfill: BackfillOut;
+  applied: boolean;
+}

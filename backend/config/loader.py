@@ -83,6 +83,14 @@ class AISettings:
     (``retry_interval_seconds`` doubling up to ``retry_interval_max_seconds``)
     until ``max_item_attempts`` is spent; ``supervisor_poll_seconds`` is the
     idle wake interval of the AI supervisor loop.
+
+    ``revive_after_seconds`` delays the automatic **second try** of a terminally
+    failed item whose failure was transient (429/5xx/timeout/malformed): the
+    supervisor flips it back into the queue with a fresh ``max_item_attempts``
+    budget once the wait elapses. ``max_item_revives`` caps how many such
+    automatic revivals one item may use, so a deterministic-but-retryable-looking
+    failure cannot cycle forever; permanent failures (video, bad key, unknown
+    model) are never revived, and a manual reanalyze resets the counter.
     """
 
     provider: str = "openrouter"
@@ -98,6 +106,8 @@ class AISettings:
     retry_interval_seconds: float = 15.0
     retry_interval_max_seconds: float = 600.0
     supervisor_poll_seconds: float = 5.0
+    revive_after_seconds: float = 1800.0
+    max_item_revives: int = 3
 
 
 @dataclass(frozen=True)
@@ -111,6 +121,35 @@ class SearchSettings:
 
 
 @dataclass(frozen=True)
+class WatchSettings:
+    """Passive background watcher (PRD §39): rescan watched comics on an interval.
+
+    ``interval_minutes`` is a float so a fractional value can be injected in
+    tests (and by ``MEME_WATCH_INTERVAL_MINUTES``); every crawl inside a pass
+    still honours ``crawler.delay_seconds`` / ``crawler.concurrency`` (AGENTS.md
+    §9) and is bounded by ``max_pages_per_run`` pages per comic.
+    """
+
+    enabled: bool = True
+    interval_minutes: float = 60.0
+    max_pages_per_run: int = 20
+
+
+@dataclass(frozen=True)
+class BackfillSettings:
+    """Site-wide backfill (backend/jobs/backfill.py): crawl a whole catalog one comic at a time.
+
+    ``enabled`` gates both ``POST /api/backfill/start`` and the startup resume
+    of an interrupted backfill; ``delay_seconds`` is the pause between comics
+    (on top of each crawl's own ``crawler.delay_seconds``), keeping the pass
+    inside the AGENTS.md §9 crawl-rate limits.
+    """
+
+    enabled: bool = True
+    delay_seconds: float = 2.0
+
+
+@dataclass(frozen=True)
 class Settings:
     """Fully resolved application settings."""
 
@@ -119,6 +158,8 @@ class Settings:
     crawler: CrawlerSettings
     ai: AISettings
     search: SearchSettings
+    watch: WatchSettings
+    backfill: BackfillSettings
     config_path: Path
 
 
@@ -226,6 +267,8 @@ def load_settings(config_path: Path | str | None = None) -> Settings:
         "crawler": CrawlerSettings,
         "ai": AISettings,
         "search": SearchSettings,
+        "watch": WatchSettings,
+        "backfill": BackfillSettings,
     }
     for name in sorted(set(raw) - set(section_classes)):
         logger.warning("unknown config section ignored section=%s", name)

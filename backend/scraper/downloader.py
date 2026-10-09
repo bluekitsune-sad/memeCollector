@@ -22,6 +22,10 @@ Contract (the crawl job and Milestone 2 code against this):
   ``Content-Length`` and again mid-stream), ``retry_attempts`` with
   exponential backoff on transport errors / 429 / 5xx, ``delay_seconds`` as
   the backoff base, ``request_timeout_seconds``.
+* Navigation guard (PRD §41): the media URL and **every redirect hop** pass
+  :func:`backend.security.urls.ensure_safe_url` before a request is issued, so
+  a hostile link can never pivot the downloader onto a private/metadata
+  address. A blocked URL is recorded as a normal ``status=FAILED`` result.
 
 The downloader writes files only — it never creates DB rows (media/source rows
 are Milestone 2).
@@ -46,6 +50,13 @@ from backend.config import Settings
 from backend.media.hashing import sha256_file
 from backend.scraper.adapters import MediaKind, MediaRef
 from backend.scraper.backoff import backoff_delay, clamp_retry_after, parse_retry_after
+from backend.security.urls import (
+    MAX_REDIRECTS,
+    REDIRECT_STATUSES,
+    UnsafeURLError,
+    ensure_safe_url,
+    reject_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -286,43 +297,59 @@ class Downloader:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=self._settings.crawler.request_timeout_seconds,
-                follow_redirects=True,
+                follow_redirects=False,  # _fetch_to_temp follows hops itself, guarding each
             )
         return self._client
 
     async def _fetch_to_temp(self, url: str, max_bytes: int) -> _Transfer:
-        """Stream ``url`` into a ``.part`` file beside the final path; cleans up on any failure."""
+        """Stream ``url`` into a ``.part`` file beside the final path; cleans up on any failure.
+
+        Redirects are followed manually, one guarded hop at a time; a blocked
+        target is a non-transient failure (retrying cannot make it safe).
+        """
         client = self._ensure_client()
         temp_path = self._destination_dir / f".download-{uuid.uuid4().hex}.part"
         completed = False
         try:
-            async with client.stream("GET", url) as response:
-                status = response.status_code
-                header_content_type = response.headers.get("content-type")
-                if status == 429 or status >= 500:
-                    return _Transfer(None, header_content_type, 0, f"HTTP {status}", True,
-                                     parse_retry_after(response.headers.get("retry-after")))
-                if status >= 400:
-                    return _Transfer(None, header_content_type, 0, f"HTTP {status}", False, None)
-                declared = _normalize_content_type(header_content_type)
-                if declared is not None and declared not in ACCEPTED_CONTENT_TYPES:
-                    return _Transfer(None, header_content_type, 0,
-                                     f"unsupported content type: {declared}", False, None)
-                content_length = _parse_content_length(response.headers.get("content-length"))
-                if content_length is not None and content_length > max_bytes:
-                    return _Transfer(None, header_content_type, 0,
-                                     f"file exceeds size limit ({content_length} > {max_bytes} bytes)",
-                                     False, None)
-                written = 0
-                with open(temp_path, "wb") as handle:
-                    async for chunk in response.aiter_bytes():
-                        written += len(chunk)
-                        if written > max_bytes:
-                            return _Transfer(None, header_content_type, written,
-                                             f"file exceeds size limit ({max_bytes} bytes)", False, None)
-                        handle.write(chunk)
-                completed = True
-                return _Transfer(temp_path, header_content_type, written, None, False, None)
+            current = url
+            for _hop in range(MAX_REDIRECTS + 1):
+                await ensure_safe_url(current)
+                async with client.stream("GET", current, follow_redirects=False) as response:
+                    status = response.status_code
+                    redirect_to = (
+                        response.headers.get("location") if status in REDIRECT_STATUSES else None
+                    )
+                    if redirect_to:
+                        current = str(httpx.URL(current).join(redirect_to))
+                        continue
+                    header_content_type = response.headers.get("content-type")
+                    if status == 429 or status >= 500:
+                        return _Transfer(None, header_content_type, 0, f"HTTP {status}", True,
+                                         parse_retry_after(response.headers.get("retry-after")))
+                    if status >= 400:
+                        return _Transfer(None, header_content_type, 0, f"HTTP {status}", False, None)
+                    declared = _normalize_content_type(header_content_type)
+                    if declared is not None and declared not in ACCEPTED_CONTENT_TYPES:
+                        return _Transfer(None, header_content_type, 0,
+                                         f"unsupported content type: {declared}", False, None)
+                    content_length = _parse_content_length(response.headers.get("content-length"))
+                    if content_length is not None and content_length > max_bytes:
+                        return _Transfer(None, header_content_type, 0,
+                                         f"file exceeds size limit ({content_length} > {max_bytes} bytes)",
+                                         False, None)
+                    written = 0
+                    with open(temp_path, "wb") as handle:
+                        async for chunk in response.aiter_bytes():
+                            written += len(chunk)
+                            if written > max_bytes:
+                                return _Transfer(None, header_content_type, written,
+                                                 f"file exceeds size limit ({max_bytes} bytes)", False, None)
+                            handle.write(chunk)
+                    completed = True
+                    return _Transfer(temp_path, header_content_type, written, None, False, None)
+            reject_url(url, "redirect limit exceeded")
+        except UnsafeURLError as exc:
+            return _Transfer(None, None, 0, f"unsafe url: {exc}", False, None)
         except httpx.HTTPError as exc:
             return _Transfer(None, None, 0, f"{type(exc).__name__}: {exc}", True, None)
         except OSError as exc:

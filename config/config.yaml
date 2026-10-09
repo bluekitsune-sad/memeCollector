@@ -1,51 +1,48 @@
-# MemeVault default configuration (PRD §40).
-# Environment variables override these values: MEME_<SECTION>_<KEY>
-# (e.g. MEME_CRAWLER_CONCURRENCY=1), plus the aliases documented in .env.example.
-# Secrets are never stored here — the AI API key is read from OPENROUTER_API_KEY in .env only.
-
 server:
-  host: 127.0.0.1            # localhost only, no public exposure (PRD §41)
+  host: 127.0.0.1
   port: 8000
-
 storage:
   media_directory: ./data/media
   thumbnail_directory: ./data/thumbnails
   preview_directory: ./data/previews
   database_path: ./data/database.sqlite
-
 crawler:
-  delay_seconds: 1.0         # >= 1s between pages (AGENTS.md §9); also the backoff base
-  concurrency: 2             # <= 2 by default (AGENTS.md §9)
-  max_pages: 100
-  download_limit: 500        # files per crawl
+  delay_seconds: 1.0
+  concurrency: 2
+  max_pages: 1000
+  download_limit: 5000
   max_file_size_mb: 100
-  headless: true             # false = show the browser
-  debug: false               # debug flag for headed debugging sessions
-  retry_attempts: 3          # HTTP attempts per page fetch / download (429/5xx retried, PRD §37)
+  headless: true
+  debug: false
+  retry_attempts: 3
   request_timeout_seconds: 30.0
-
 ai:
-  provider: openrouter       # OpenAI-compatible chat-completions with vision (PRD §0)
-  # Free OpenRouter models (":free" suffix) — no cost, rate-limited tier (PRD §0).
-  # Vision must accept image input; embedding model dims define the semantic index.
+  provider: openrouter
   model: dots-studio/dots-3-note-preview:free
   embedding_model: nvidia/nemotron-3-embed-1b:free
-  ai_concurrency: 2          # items processed in parallel by the AI queue (PRD §37)
-  timeout_seconds: 60.0      # per-request OpenRouter HTTP timeout
-  retry_attempts: 3          # HTTP attempts for 429/5xx/timeouts, exponential backoff
-  retry_backoff_seconds: 1.0 # backoff base: 1s, 2s, 4s, … (capped)
-  mock_embedding_dim: 384    # mock provider vector size (offline/demo mode, no key needed)
-  # Background retry of transient per-item failures (PRD §36 — a failed item
-  # never stops the queue, and rate-limited items come back on their own).
-  max_item_attempts: 6              # per-item budget before the item fails for good
-  retry_interval_seconds: 15.0      # backoff base: 15s, 30s, 60s, 120s, …
-  retry_interval_max_seconds: 600.0 # backoff cap (10 min)
-  supervisor_poll_seconds: 5.0      # AI supervisor idle wake interval
-
+  ai_concurrency: 2
+  timeout_seconds: 60.0
+  retry_attempts: 3
+  retry_backoff_seconds: 1.0
+  mock_embedding_dim: 384
+  max_item_attempts: 6
+  retry_interval_seconds: 15.0
+  retry_interval_max_seconds: 600.0
+  supervisor_poll_seconds: 5.0
+  revive_after_seconds: 1800.0
+  max_item_revives: 3
 search:
-  # Hybrid ranking weights (PRD §22):
-  # 0.25 keyword + 0.50 semantic + 0.20 tag + 0.05 metadata = 1.00
   keyword_weight: 0.25
-  semantic_weight: 0.50
-  tag_weight: 0.20
+  semantic_weight: 0.5
+  tag_weight: 0.2
   metadata_weight: 0.05
+watch:
+  enabled: true
+  interval_minutes: 60.0
+  max_pages_per_run: 20
+backfill:
+  # Site-wide catalog crawl (one comic at a time) started from the Jobs tab.
+  # enabled=false blocks new backfills and the startup resume of an interrupted one.
+  enabled: true
+  # Pause between comics, on top of each crawl's own crawler.delay_seconds.
+  delay_seconds: 2.0

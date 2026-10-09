@@ -101,6 +101,7 @@ class CrawlJob:
         http_client: httpx.AsyncClient | None = None,
         url_already_downloaded: Callable[[str], bool] | None = None,
         ingest: bool = False,
+        extra_params: dict[str, object] | None = None,
     ) -> None:
         self._url = url
         self._scope = scope if scope is not None else CrawlScope(ScopeKind.CURRENT_PAGE)
@@ -112,6 +113,7 @@ class CrawlJob:
         self._http_client = http_client
         self._url_already_downloaded = url_already_downloaded
         self._ingest = ingest
+        self._extra_params = extra_params or {}
         self._controller = CrawlController()
         self._job_id: int | None = None
         self._crawl_state = CrawlProgress()
@@ -120,6 +122,11 @@ class CrawlJob:
     @property
     def controller(self) -> CrawlController:
         return self._controller
+
+    @property
+    def url(self) -> str:
+        """The entry URL this crawl was started from (pipeline auto-registration)."""
+        return self._url
 
     @property
     def job_id(self) -> int | None:
@@ -262,8 +269,13 @@ class CrawlJob:
         return "duplicate" if media_id is None else "new"
 
     def _create_job_row(self, scope: CrawlScope) -> None:
+        # ``urls`` lets a restart resume custom_urls/multiple_chapters crawls
+        # (backend/jobs/resume.py) — the other scope kinds ignore it.
+        # ``extra_params`` tags owner-managed crawls (e.g. the site-wide
+        # backfill) so the generic resume never relaunches them separately.
         params = json.dumps({"url": self._url, "scope": scope.kind.value,
-                             "force_rescan": self._force_rescan})
+                             "force_rescan": self._force_rescan,
+                             "urls": list(scope.urls), **self._extra_params})
         with transaction(self._db):
             cursor = self._db.execute(
                 "INSERT INTO jobs (job_type, status, progress, message, params, started_at) "

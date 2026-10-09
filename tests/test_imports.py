@@ -17,6 +17,7 @@ PACKAGES = [
     "backend.database.migrations",
     "backend.scraper",
     "backend.scraper.adapters",
+    "backend.security",
     "backend.media",
     "backend.ai",
     "backend.search",

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import HeaderFallback from "@/components/HeaderFallback";
 import SiteHeader from "@/components/SiteHeader";
 import "./globals.css";
+import "./mistral.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

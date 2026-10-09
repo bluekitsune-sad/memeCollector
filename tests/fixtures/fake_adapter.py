@@ -23,6 +23,7 @@ from backend.scraper.adapters import (
     MediaRef,
     PageRef,
     ScopeKind,
+    SeriesRef,
     SiteAdapter,
 )
 from backend.scraper.crawler import PageFetchError
@@ -48,17 +49,30 @@ class FakeSiteAdapter(SiteAdapter):
 
     ``listing_html`` (the chapter-listing fixture) powers ``ENTIRE_COMIC``
     discovery; without it that scope falls back to the current chapter.
+    ``series`` powers :meth:`discover_series` for the site-wide backfill.
     """
 
     site = "fixture"
     render = False
 
-    def __init__(self, *, listing_html: str | None = None, chapter_pages: int = 3) -> None:
+    def __init__(
+        self,
+        *,
+        listing_html: str | None = None,
+        chapter_pages: int = 3,
+        series: list[SeriesRef] | None = None,
+        own_chapters_only: bool = False,
+    ) -> None:
         self._listing_html = listing_html
         self._chapter_pages = chapter_pages
+        self._series = list(series or [])
+        self._own_chapters_only = own_chapters_only
 
     def can_handle(self, url: str) -> bool:
         return urlparse(url).hostname == "fixture.test"
+
+    def discover_series(self, url: str) -> list[SeriesRef]:
+        return list(self._series)
 
     def discover_pages(self, url: str, scope: CrawlScope) -> list[PageRef]:
         if scope.kind is ScopeKind.CUSTOM_URLS:
@@ -118,8 +132,11 @@ class FakeSiteAdapter(SiteAdapter):
     def _chapters_from_listing(self, entry_url: str) -> list[PageRef]:
         soup = BeautifulSoup(self._listing_html or "", "html.parser")
         refs: list[PageRef] = []
+        prefix = urlparse(entry_url).path.rstrip("/") + "/"
         for link in soup.select("a.chapter-link"):
             chapter_url = urljoin(entry_url, link["href"])
+            if self._own_chapters_only and not urlparse(chapter_url).path.startswith(prefix):
+                continue  # the shared listing also advertises other comics' chapters
             pages = int(link.get("data-pages", "1"))
             refs.extend(self._with_page(chapter_url, number) for number in range(1, pages + 1))
         return refs

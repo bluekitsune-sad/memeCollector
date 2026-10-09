@@ -49,6 +49,7 @@ from backend.ai.queue import (
     AIQueueController,
     AIQueueSummary,
     count_claimable,
+    revive_due_failures,
     run_ai_queue,
 )
 from backend.ai.runner import AIQueueGate
@@ -191,6 +192,12 @@ class AISupervisor:
     # -- loop steps ---------------------------------------------------------
 
     async def _tick(self) -> None:
+        # Second try first (PRD §36): flip retryable FAILED rows whose revive
+        # deadline passed back into claimable state, so this tick's claim sees
+        # them. Permanent failures (video/bad key/unknown model) are untouched.
+        revived = revive_due_failures(self._db, self._settings)
+        if revived:
+            logger.info("ai supervisor revived failed items count=%d", revived)
         claimable = count_claimable(self._db)
         if claimable == 0:
             await self._idle_or_hold()

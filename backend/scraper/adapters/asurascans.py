@@ -35,6 +35,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
+from html import unescape
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -48,9 +49,12 @@ from backend.scraper.adapters.base import (
     MediaRef,
     PageRef,
     ScopeKind,
+    SeriesRef,
     SiteAdapter,
     register,
 )
+from backend.security.fetch import guarded_get
+from backend.security.urls import UnsafeURLError
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,12 @@ _COMMENT_ID_RE = re.compile(r"^comment-(\d+)$")
 
 #: URL suffix → media kind (PRD §5.3); anything else is a plain image.
 _KIND_BY_SUFFIX: dict[str, MediaKind] = {".gif": "gif", ".mp4": "video", ".webm": "video"}
+
+#: Catalog payload entries on ``/comics``: ``"slug":[0,"…"],"title":[0,"…"]``
+#: (RSC-style pairs; verified live 2026-10-08 after HTML-entity unescaping).
+_PAYLOAD_ENTRY_RE = re.compile(
+    r'"slug":\[0,"([^"]+)"\][^{}]{0,500}?"title":\[0,"((?:[^"\\]|\\.)*)"\]'
+)
 
 #: Ordered attribute preference for lazy-loaded images.
 _LAZY_SRC_ATTRIBUTES: tuple[str, ...] = ("data-src", "data-original", "data-lazy-src", "srcset", "src")
@@ -110,12 +120,15 @@ def _origin(url: str) -> str:
 
 
 def _default_fetch_html(url: str) -> str:
-    """Live fetch used by discovery (runs inside ``asyncio.to_thread``)."""
-    response = httpx.get(
+    """Live fetch used by discovery (runs inside ``asyncio.to_thread``).
+
+    Goes through the URL guard so a hostile redirect cannot pivot the fetch
+    onto a private/metadata address (PRD §41).
+    """
+    response = guarded_get(
         url,
         headers={"User-Agent": _USER_AGENT},
         timeout=_FETCH_TIMEOUT_SECONDS,
-        follow_redirects=True,
     )
     response.raise_for_status()
     return response.text
@@ -254,6 +267,59 @@ class AsuraScansAdapter(SiteAdapter):
         )
         return None
 
+    def discover_series(self, url: str) -> list[SeriesRef]:
+        """Every series on the ``/comics`` catalog index: link hrefs + payload titles.
+
+        The index is a single page (verified live 2026-10-08 — query-string
+        pagination is ignored by the server). Series URLs come from
+        ``a[href^=/comics/]`` anchors; titles come from the embedded catalog
+        payload (``slug``/``title`` pairs) with the anchor text as fallback.
+        """
+        path = urlparse(url).path.rstrip("/")
+        if path != "/comics":
+            logger.warning(
+                "series discovery needs the catalog index site=asurascans url=%s", url
+            )
+            return []
+        try:
+            html = self._fetch_html(url)
+        except (httpx.HTTPError, OSError, UnsafeURLError) as exc:
+            logger.warning("catalog fetch failed site=asurascans url=%s error=%s", url, exc)
+            return []
+        titles = self._catalog_titles(html)
+        origin = _origin(url)
+        host = urlparse(url).netloc
+        series: list[SeriesRef] = []
+        seen: set[str] = set()
+        for anchor in BeautifulSoup(html, "html.parser").select("a[href]"):
+            absolute = urljoin(url, str(anchor.get("href", "")))
+            parsed = urlparse(absolute)
+            if parsed.netloc and parsed.netloc != host:
+                continue
+            series_path = parsed.path.rstrip("/")
+            if not _SERIES_PATH_RE.fullmatch(series_path) or series_path in seen:
+                continue
+            seen.add(series_path)
+            slug = series_path.rsplit("/", 1)[-1]
+            title = titles.get(slug) or anchor.get_text(" ", strip=True) or None
+            series.append(SeriesRef(url=f"{origin}{series_path}", title=title))
+        if not series:
+            logger.warning(
+                "catalog discovery matched nothing site=asurascans url=%s "
+                "selectors=a[href^=/comics/], catalog payload",
+                url,
+            )
+        return series
+
+    @staticmethod
+    def _catalog_titles(html: str) -> dict[str, str]:
+        """``slug → title`` from the page's embedded catalog payload (best effort)."""
+        titles: dict[str, str] = {}
+        for slug, title in _PAYLOAD_ENTRY_RE.findall(unescape(html)):
+            if title:
+                titles.setdefault(slug, title)
+        return titles
+
     def _discover_entire_comic(self, url: str) -> list[PageRef]:
         entry_ref = self._page_ref(url)
         series_path = re.sub(r"/chapter/[^/]+$", "", urlparse(url).path.rstrip("/"))
@@ -267,7 +333,7 @@ class AsuraScansAdapter(SiteAdapter):
         series_url = f"{_origin(url)}{series_path}"
         try:
             html = self._fetch_html(series_url)
-        except (httpx.HTTPError, OSError) as exc:
+        except (httpx.HTTPError, OSError, UnsafeURLError) as exc:
             logger.warning(
                 "series page fetch failed site=asurascans url=%s error=%s", series_url, exc
             )

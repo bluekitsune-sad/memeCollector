@@ -8,6 +8,11 @@
 
 import type {
   AiStatus,
+  BackfillActionResponse,
+  BackfillDetailOut,
+  BackfillItemsResponse,
+  BackfillListResponse,
+  BackfillOut,
   Job,
   JobActionResponse,
   JobListResponse,
@@ -187,4 +192,37 @@ export function getSettings(): Promise<SettingsResponse> {
 
 export function updateSettings(patch: SettingsPatch): Promise<SettingsResponse> {
   return request<SettingsResponse>("/api/settings", jsonInit("PATCH", patch));
+}
+
+// --- Site-wide backfill -----------------------------------------------------
+
+/** Backfill runs, newest first. */
+export function listBackfills(limit = 10): Promise<BackfillListResponse> {
+  return request<BackfillListResponse>(`/api/backfill${buildQuery({ limit })}`);
+}
+
+/** One run with per-status item counts. */
+export function getBackfill(id: number): Promise<BackfillDetailOut> {
+  return request<BackfillDetailOut>(`/api/backfill/${id}`);
+}
+
+/** Comics queued in a run (paginated; newest state first). */
+export function listBackfillItems(
+  id: number,
+  params: { limit?: number; offset?: number } = {},
+): Promise<BackfillItemsResponse> {
+  return request<BackfillItemsResponse>(`/api/backfill/${id}/items${buildQuery(params)}`);
+}
+
+/** Start a run (202). Throws `ApiError` 400 when disabled/unsupported, 409 when one is running. */
+export function startBackfill(): Promise<BackfillOut> {
+  return request<BackfillOut>("/api/backfill/start", jsonInit("POST", {}));
+}
+
+/** Pause / resume / cancel / retry-failed on one run. */
+export function backfillAction(
+  id: number,
+  action: "pause" | "resume" | "cancel" | "retry-failed",
+): Promise<BackfillActionResponse> {
+  return request<BackfillActionResponse>(`/api/backfill/${id}/${action}`, jsonInit("POST"));
 }

@@ -49,6 +49,8 @@ from backend.scraper.adapters.base import (
     SiteAdapter,
     register,
 )
+from backend.security.fetch import guarded_get
+from backend.security.urls import UnsafeURLError
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +123,15 @@ def _origin(url: str) -> str:
 
 
 def _default_fetch_html(url: str) -> str:
-    """Live fetch used by discovery (runs inside ``asyncio.to_thread``)."""
-    response = httpx.get(
+    """Live fetch used by discovery (runs inside ``asyncio.to_thread``).
+
+    Goes through the URL guard so a hostile redirect cannot pivot the fetch
+    onto a private/metadata address (PRD §41).
+    """
+    response = guarded_get(
         url,
         headers={"User-Agent": _USER_AGENT},
         timeout=_FETCH_TIMEOUT_SECONDS,
-        follow_redirects=True,
     )
     response.raise_for_status()
     return response.text
@@ -319,7 +324,7 @@ class MangaParkAdapter(SiteAdapter):
         title_url = f"{_origin(url)}{title_path}"
         try:
             html = self._fetch_html(title_url)
-        except (httpx.HTTPError, OSError) as exc:
+        except (httpx.HTTPError, OSError, UnsafeURLError) as exc:
             logger.warning(
                 "title page fetch failed site=mangapark url=%s error=%s", title_url, exc
             )

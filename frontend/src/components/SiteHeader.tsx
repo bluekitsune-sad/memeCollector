@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { getRandomMedia } from "@/lib/api";
+import PixelMark from "@/components/PixelMark";
 
 const LINKS: { href: string; label: string }[] = [
   { href: "/", label: "Gallery" },
@@ -44,7 +45,7 @@ export default function SiteHeader() {
     <header className="app-header">
       <Link href="/" className="brand" aria-label="MemeVault home">
         <span className="brand-mark" aria-hidden="true">
-          M
+          <PixelMark />
         </span>
         MemeVault
       </Link>

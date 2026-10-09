@@ -17,13 +17,17 @@ def test_loads_yaml_defaults() -> None:
     assert settings.server.port == 8000
     assert settings.crawler.delay_seconds == 1.0
     assert settings.crawler.concurrency == 2
-    assert settings.crawler.max_pages == 100
-    assert settings.crawler.download_limit == 500
+    assert settings.crawler.max_pages == 1000   # entire-comic crawls (backfill) stay uncapped in practice
+    assert settings.crawler.download_limit == 5000
     assert settings.crawler.max_file_size_mb == 100
     assert settings.crawler.headless is True
     assert settings.crawler.debug is False
     assert settings.ai.provider == "openrouter"
     assert settings.ai.ai_concurrency == 2
+    # Site-wide backfill section (PRD §36 long-running job).
+    backfill = load_settings().backfill
+    assert backfill.enabled is True
+    assert backfill.delay_seconds == 2.0
 
 
 def test_search_weights_match_prd_22() -> None:

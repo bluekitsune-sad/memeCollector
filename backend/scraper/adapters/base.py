@@ -38,6 +38,8 @@ from urllib.parse import urlparse
 
 from bs4 import Tag
 
+from backend.security.text import sanitize_optional_text, sanitize_text
+
 logger = logging.getLogger(__name__)
 
 #: What kind of comment attachment a :class:`MediaRef` points at (PRD §5.3, §44).
@@ -77,10 +79,28 @@ class PageRef:
     page_number: int | None = None
 
 
+@dataclass(frozen=True)
+class SeriesRef:
+    """One comic/series entry on a site's catalog index (site-wide backfill).
+
+    Produced by :meth:`SiteAdapter.discover_series` from a catalog URL such as
+    ``https://asurascans.com/comics``; ``title`` may be ``None`` when the index
+    does not expose one (the backfill then shows the URL).
+    """
+
+    url: str
+    title: str | None = None
+
+
 @dataclass
 class CommentMeta:
     """Provenance for one comment (PRD §31). Mutable: the crawler backfills
-    ``page_url``/``chapter``/``page_number`` when the adapter leaves them empty."""
+    ``page_url``/``chapter``/``page_number`` when the adapter leaves them empty.
+
+    Storage choke point for untrusted text: ``comment_id``, ``author_name`` and
+    ``text`` are sanitized on construction (AGENTS.md §9), so every adapter
+    returning ``comment.meta`` hands the crawler/DB clean values only.
+    """
 
     comment_id: str
     author_name: str | None = None
@@ -88,6 +108,11 @@ class CommentMeta:
     chapter: str | None = None
     page_number: int | None = None
     text: str | None = None
+
+    def __post_init__(self) -> None:
+        self.comment_id = sanitize_text(self.comment_id)
+        self.author_name = sanitize_optional_text(self.author_name)
+        self.text = sanitize_optional_text(self.text)
 
 
 @dataclass
@@ -154,6 +179,17 @@ class SiteAdapter(ABC):
     @abstractmethod
     def get_comment_metadata(self, comment: Comment) -> CommentMeta:
         """Return the metadata for ``comment``."""
+
+    def discover_series(self, url: str) -> list[SeriesRef]:
+        """Expand a catalog-index URL into its comic series pages (site-wide backfill).
+
+        Optional step of the contract (AGENTS.md §5): sites whose index cannot
+        be enumerated keep the default empty result and simply cannot be the
+        target of a backfill. Like ``discover_pages`` this may perform a fetch
+        and runs inside a worker thread (``asyncio.to_thread``) — obey the
+        configured crawl delay (AGENTS.md §9).
+        """
+        return []
 
 
 # ---------------------------------------------------------------------------

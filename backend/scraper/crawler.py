@@ -21,6 +21,12 @@ is recorded as a :class:`CrawlFailure` and never aborts the crawl (PRD §36).
 Rate limits come from ``Settings.crawler``: ``delay_seconds`` between page fetch
 slots, ``concurrency`` in-flight pages, ``retry_attempts`` per fetch.
 
+Navigation guard (PRD §41): every URL is validated by :mod:`backend.security.urls`
+*before* any request or browser navigation is issued, redirects are followed one
+hop at a time so each target is re-validated, and a blocked URL surfaces as
+:class:`PageFetchError` — logged as ``key=value`` by the guard and recorded as a
+per-page failure, never as a crashed crawl.
+
 Tests never hit the network: inject any object implementing :class:`PageFetcher`
 that returns fixture HTML.
 """
@@ -49,6 +55,13 @@ from backend.scraper.adapters import (
     get_adapter,
 )
 from backend.scraper.backoff import backoff_delay, clamp_retry_after, parse_retry_after
+from backend.security.urls import (
+    MAX_REDIRECTS,
+    REDIRECT_STATUSES,
+    UnsafeURLError,
+    ensure_safe_url,
+    reject_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +109,8 @@ async def _retrying(
 
     Transient = transport error (``status is None``), HTTP 429, or 5xx. Any other
     4xx raises :class:`PageFetchError` immediately — retrying cannot fix it.
+    A URL blocked by the navigation guard also raises immediately (retrying
+    cannot make an unsafe URL safe).
     """
     attempts = max(1, settings.crawler.retry_attempts)
     base_delay = settings.crawler.delay_seconds
@@ -123,6 +138,19 @@ async def _retrying(
     raise PageFetchError(f"fetch failed after {attempts} attempts url={url} reason={reason}")
 
 
+async def _guard_url(url: str) -> None:
+    """Validate one navigation target before any bytes leave the machine (PRD §41).
+
+    The guard logs the block as ``key=value``; translating it to
+    :class:`PageFetchError` makes it a normal per-page failure the crawler
+    records instead of an exception that could tear down the crawl (PRD §36).
+    """
+    try:
+        await ensure_safe_url(url)
+    except UnsafeURLError as exc:
+        raise PageFetchError(f"unsafe url blocked: {exc}") from exc
+
+
 class HttpxFetcher:
     """Static-page fetcher: httpx with redirects, timeout, and backoff (PRD §11, §37)."""
 
@@ -132,18 +160,33 @@ class HttpxFetcher:
         self._owns_client = client is None
 
     async def fetch(self, url: str) -> str:
+        await _guard_url(url)
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=self._settings.crawler.request_timeout_seconds,
-                follow_redirects=True,
+                follow_redirects=False,  # redirects are followed one guarded hop at a time
             )
         return await _retrying(lambda: self._attempt(url), url=url,
                                 settings=self._settings, source="httpx")
 
     async def _attempt(self, url: str) -> _Attempt:
         assert self._client is not None
+        current = url
         try:
-            response = await self._client.get(url)
+            for _hop in range(MAX_REDIRECTS + 1):
+                await ensure_safe_url(current)
+                response = await self._client.get(current, follow_redirects=False)
+                if response.status_code in REDIRECT_STATUSES:
+                    location = response.headers.get("location")
+                    if not location:
+                        break
+                    current = str(httpx.URL(current).join(location))
+                    continue
+                break
+            else:
+                reject_url(url, "redirect limit exceeded")
+        except UnsafeURLError as exc:
+            raise PageFetchError(f"unsafe url blocked: {exc}") from exc
         except httpx.HTTPError as exc:
             return _Attempt(status=None, error=f"{type(exc).__name__}: {exc}")
         body = response.text if 200 <= response.status_code < 300 else ""
@@ -191,6 +234,9 @@ class PlaywrightFetcher:
             raise
 
     async def fetch(self, url: str) -> str:
+        # Guard first: a hostile URL must be rejected before Chromium launches
+        # (or navigates), so this path is testable without a browser.
+        await _guard_url(url)
         await self.start()
         return await _retrying(lambda: self._attempt(url), url=url,
                                 settings=self._settings, source="playwright")
@@ -204,6 +250,11 @@ class PlaywrightFetcher:
             return _Attempt(status=None, error=f"{type(exc).__name__}: {exc}")
         if response is None:
             return _Attempt(status=None, error="navigation returned no response")
+        # Chromium followed redirects internally — re-check where we actually landed.
+        try:
+            await ensure_safe_url(self._page.url)
+        except UnsafeURLError as exc:
+            raise PageFetchError(f"unsafe url blocked: {exc}") from exc
         body = await self._page.content() if 200 <= response.status < 300 else ""
         return _Attempt(
             status=response.status,

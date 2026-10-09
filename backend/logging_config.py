@@ -21,6 +21,11 @@ Configuration rules:
 * **idempotent** — a marker attribute on the logger means a second call (every
   ``create_app()`` in the test suite) is a no-op; ``force=True`` replaces the
   handlers instead (used to point the file handler at a temp dir);
+* **secret redaction** — every handler carries a
+  :class:`_SecretRedactionFilter` that scrubs the value of
+  ``OPENROUTER_API_KEY`` out of the formatted message (PRD §41: API keys never
+  in logs); exception tracebacks are deliberately left as-is because they never
+  carry request headers;
 * **``propagate=True``** stays untouched, so pytest's ``caplog`` and any root
   handler still see backend records — handlers are *added*, never a takeover;
 * level comes from ``MEME_LOG_LEVEL`` (``DEBUG``/``INFO``/``WARNING``/…),
@@ -54,6 +59,14 @@ DEFAULT_LEVEL = "INFO"
 #: Package logger every backend module logs through (``logging.getLogger(__name__)``).
 PACKAGE_LOGGER_NAME = "backend"
 
+#: Env vars whose values must never appear in any log line (PRD §41).
+SECRET_ENV_VARS: tuple[str, ...] = ("OPENROUTER_API_KEY",)
+
+#: Secrets shorter than this are not masked — replacing e.g. "test" would mangle ordinary text.
+MIN_SECRET_LENGTH = 8
+
+REDACTED_PLACEHOLDER = "[redacted]"
+
 _FORMAT = "%(asctime)s %(levelname)-5s %(name)s: %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _MARKER = "_memevault_logging_configured"
@@ -79,6 +92,41 @@ def resolve_level(level: str | int | None = None) -> int:
     return logging.getLevelNamesMapping()[DEFAULT_LEVEL]
 
 
+def _mask_secrets(message: str) -> str:
+    """Return ``message`` with every configured secret value replaced by ``[redacted]``."""
+    masked = message
+    for env_var in SECRET_ENV_VARS:
+        secret = os.environ.get(env_var, "")
+        if len(secret) >= MIN_SECRET_LENGTH and secret in masked:
+            masked = masked.replace(secret, REDACTED_PLACEHOLDER)
+    return masked
+
+
+class _SecretRedactionFilter(logging.Filter):
+    """Scrub API-key values out of log records before a handler formats them.
+
+    Attached to each handler (not to the logger) so the record is cleaned as
+    soon as it reaches the first backend handler — every handler and any
+    downstream ``caplog``/root handler then sees the masked text. The secret is
+    read lazily from the environment, so a key configured after
+    :func:`configure_logging` still gets masked, and ``record.args`` is cleared
+    once the message is rewritten so ``getMessage()`` cannot re-format it.
+    Exception tracebacks are intentionally not rewritten (they never carry
+    request headers or the key).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError):
+            return True  # malformed record — let normal formatting raise where it always did
+        masked = _mask_secrets(message)
+        if masked != message:
+            record.msg = masked
+            record.args = ()
+        return True
+
+
 def configure_logging(
     *,
     level: str | int | None = None,
@@ -102,6 +150,7 @@ def configure_logging(
 
     console = logging.StreamHandler(sys.stderr)
     console.setFormatter(formatter)
+    console.addFilter(_SecretRedactionFilter())
     logger.addHandler(console)
 
     directory = Path(log_directory) if log_directory is not None else LOG_DIRECTORY
@@ -118,6 +167,7 @@ def configure_logging(
             delay=True,  # the file is only created once something is logged
         )
         file_handler.setFormatter(formatter)
+        file_handler.addFilter(_SecretRedactionFilter())
         logger.addHandler(file_handler)
 
     setattr(logger, _MARKER, True)

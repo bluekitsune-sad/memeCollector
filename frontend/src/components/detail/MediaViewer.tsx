@@ -49,7 +49,7 @@ export default function MediaViewer({ item }: { item: MediaDetail }) {
     <div className="detail-media">
       {/* Plain <img> on purpose: the original may be an animated GIF served from /api. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={alt} onError={() => setFailed(true)} />
+      <img src={src} alt={alt} className="pixel-art" onError={() => setFailed(true)} />
     </div>
   );
 }

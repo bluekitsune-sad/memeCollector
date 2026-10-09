@@ -33,7 +33,12 @@ Security/privacy (PRD §41–42): the API key is read from ``settings.ai.api_key
 (env only) and travels solely in the ``Authorization`` header of outgoing
 requests — it is never logged, never included in exception messages, and never
 written to the database. Only the media bytes being analyzed are sent to the
-cloud, and only when this provider is enabled.
+cloud, and only when this provider is enabled. Untrusted strings that reach the
+model (the reported mime type, embedding input) are sanitized
+(:mod:`backend.security.text`) and quoted as data via
+:func:`backend.security.prompt.wrap_untrusted_text`, while the system prompt
+stays a fixed constant — prompt injection in crawled metadata cannot become an
+instruction.
 """
 
 from __future__ import annotations
@@ -55,6 +60,8 @@ from backend.ai.provider import (
 )
 from backend.config.loader import AISettings
 from backend.scraper.backoff import backoff_delay, clamp_retry_after, parse_retry_after
+from backend.security.prompt import wrap_untrusted_text
+from backend.security.text import sanitize_text
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +111,19 @@ class OpenRouterProvider(VisionProvider):
         return self._settings.embedding_model
 
     async def analyze_image(self, image_bytes: bytes, *, mime_type: str) -> dict[str, Any]:
+        # ``mime_type`` derives from stored (attacker-influenceable) metadata: it is
+        # sanitized for the data URI and quoted as untrusted data in the prompt so
+        # instruction-like content in it cannot steer the model (AGENTS.md §9).
+        safe_mime = sanitize_text(mime_type)
         content: list[dict[str, Any]] = [
-            {"type": "text", "text": f"Analyze this comment-section image (content type: {mime_type})."},
-            _image_part(image_bytes, mime_type),
+            {
+                "type": "text",
+                "text": (
+                    "Analyze this comment-section image. Its reported content type "
+                    f"is quoted here as data:\n{wrap_untrusted_text(safe_mime)}"
+                ),
+            },
+            _image_part(image_bytes, safe_mime),
         ]
         return await self._analyze(content)
 
@@ -124,8 +141,12 @@ class OpenRouterProvider(VisionProvider):
         return await self._analyze(content)
 
     async def generate_embedding(self, text: str) -> list[float]:
-        """Embed ``text`` via OpenRouter's embeddings router (see module docstring for support reality)."""
-        payload = {"model": self._settings.embedding_model, "input": text}
+        """Embed ``text`` via OpenRouter's embeddings router (see module docstring for support reality).
+
+        The input is untrusted text (filenames/metadata from crawled pages), so
+        it is sanitized before it leaves the machine.
+        """
+        payload = {"model": self._settings.embedding_model, "input": sanitize_text(text)}
         response = await self._post(EMBEDDINGS_URL, payload, endpoint="embeddings")
         if response.status_code >= 400:
             raise AIUnavailableError(

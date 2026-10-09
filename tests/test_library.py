@@ -334,8 +334,10 @@ def test_counts_include_dup_breakdown(db, library_settings, tmp_path) -> None:
     assert count_media(db) == 3
     breakdown = count_by_dup_status(db)
     assert breakdown == {"dup": 1, "nondup": 2, "unflagged": 0}
-    only_dup = count_by_dup_status(db, MediaFilters(dup_status="dup"))
-    assert only_dup == {"dup": 1, "nondup": 0, "unflagged": 0}
+    # Faceted counting: applying the dup filter must NOT collapse the badges —
+    # the strip keeps showing the full breakdown while the gallery is filtered.
+    filtered = count_by_dup_status(db, MediaFilters(dup_status="dup"))
+    assert filtered == {"dup": 1, "nondup": 2, "unflagged": 0}
 
 
 def test_remove_media_deletes_rows_and_files(db, library_settings, tmp_path) -> None:

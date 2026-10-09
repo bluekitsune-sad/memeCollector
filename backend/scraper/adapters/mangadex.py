@@ -53,6 +53,7 @@ from backend.scraper.adapters.base import (
     SiteAdapter,
     register,
 )
+from backend.security.fetch import guarded_get
 
 logger = logging.getLogger(__name__)
 
@@ -133,11 +134,11 @@ def _blocked_media(node: Tag, value: str) -> bool:
 
 
 def _get(url: str) -> httpx.Response:
-    return httpx.get(
+    # Guarded GET: every hop is validated before the request is issued (PRD §41).
+    return guarded_get(
         url,
         headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
         timeout=_FETCH_TIMEOUT_SECONDS,
-        follow_redirects=True,
     )
 
 

@@ -1,23 +1,24 @@
-/* MemeVault — dark, media-browser theme. Plain CSS only (AGENTS.md §4). */
+/* MemeVault — dark, media-browser theme (single dark palette; mistral.css
+   layers the Mistral skin and pixel-art flourishes on top). Plain CSS only. */
 
 :root {
-  --bg: #0c0e12;
-  --bg-raised: #14171d;
-  --bg-sunken: #0a0c10;
-  --bg-hover: #1b1f28;
-  --border: #262c37;
-  --border-strong: #39414f;
-  --text: #e8ebf1;
-  --text-dim: #98a1b0;
-  --text-faint: #6b7484;
-  --accent: #7c5cff;
-  --accent-hover: #9377ff;
-  --accent-soft: rgba(124, 92, 255, 0.16);
-  --ok: #3ddc97;
-  --warn: #ffb020;
-  --danger: #ff5c72;
+  --bg: #171717;
+  --bg-raised: #1e1e1c;
+  --bg-sunken: #111110;
+  --bg-hover: #2a2a28;
+  --border: #363633;
+  --border-strong: #55554f;
+  --text: #f7f7f5;
+  --text-dim: #b8b8b2;
+  --text-faint: #8f8f8a;
+  --accent: #ff4f00;
+  --accent-hover: #e94500;
+  --accent-soft: rgba(255, 79, 0, 0.16);
+  --ok: #45c98a;
+  --warn: #e8a83a;
+  --danger: #f0596d;
   --radius: 10px;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -76,7 +77,7 @@ textarea {
   gap: 12px;
   align-items: center;
   padding: 12px 20px;
-  background: rgba(12, 14, 18, 0.92);
+  background: rgba(23, 23, 23, 0.92);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(8px);
 }
@@ -96,8 +97,8 @@ textarea {
   width: 26px;
   height: 26px;
   border-radius: 7px;
-  background: linear-gradient(135deg, var(--accent), #4ec9ff);
-  color: #0b0d12;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  color: var(--bg);
   font-size: 14px;
   font-weight: 800;
 }
@@ -201,7 +202,7 @@ textarea {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0c0e12;
+  color: var(--bg);
   font-weight: 600;
 }
 
@@ -210,12 +211,12 @@ textarea {
 }
 
 .btn.danger {
-  border-color: rgba(255, 92, 114, 0.6);
+  border-color: rgba(240, 89, 109, 0.6);
   color: var(--danger);
 }
 
 .btn.danger:hover:not(:disabled) {
-  background: rgba(255, 92, 114, 0.12);
+  background: rgba(240, 89, 109, 0.12);
 }
 
 .btn.small {
@@ -494,39 +495,39 @@ button.stat:hover {
 }
 
 .badge.gif {
-  background: rgba(78, 201, 255, 0.16);
-  color: #7fd8ff;
-  border-color: rgba(78, 201, 255, 0.4);
+  background: rgba(108, 200, 236, 0.16);
+  color: #6cc8ec;
+  border-color: rgba(108, 200, 236, 0.4);
 }
 
 .badge.ready {
-  background: rgba(61, 220, 151, 0.14);
+  background: rgba(69, 201, 138, 0.14);
   color: var(--ok);
-  border-color: rgba(61, 220, 151, 0.4);
+  border-color: rgba(69, 201, 138, 0.4);
 }
 
 .badge.processing {
-  background: rgba(255, 176, 32, 0.14);
+  background: rgba(232, 168, 58, 0.14);
   color: var(--warn);
-  border-color: rgba(255, 176, 32, 0.4);
+  border-color: rgba(232, 168, 58, 0.4);
 }
 
 .badge.failed {
-  background: rgba(255, 92, 114, 0.14);
+  background: rgba(240, 89, 109, 0.14);
   color: var(--danger);
-  border-color: rgba(255, 92, 114, 0.45);
+  border-color: rgba(240, 89, 109, 0.45);
 }
 
 .badge.dup {
-  background: rgba(255, 92, 114, 0.14);
+  background: rgba(240, 89, 109, 0.14);
   color: var(--danger);
-  border-color: rgba(255, 92, 114, 0.45);
+  border-color: rgba(240, 89, 109, 0.45);
 }
 
 .badge.nondup {
-  background: rgba(61, 220, 151, 0.14);
+  background: rgba(69, 201, 138, 0.14);
   color: var(--ok);
-  border-color: rgba(61, 220, 151, 0.4);
+  border-color: rgba(69, 201, 138, 0.4);
 }
 
 .badge.unflagged {
@@ -589,10 +590,10 @@ button.stat:hover {
 
 .error-panel {
   padding: 16px;
-  border: 1px solid rgba(255, 92, 114, 0.5);
+  border: 1px solid rgba(240, 89, 109, 0.5);
   border-radius: var(--radius);
-  background: rgba(255, 92, 114, 0.08);
-  color: #ffc7cf;
+  background: rgba(240, 89, 109, 0.08);
+  color: #ff9aa8;
   display: flex;
   gap: 12px;
   align-items: center;
@@ -725,7 +726,7 @@ button.stat:hover {
   border-left-color: var(--warn);
   font-weight: 700;
   color: var(--text);
-  background: rgba(255, 176, 32, 0.08);
+  background: rgba(232, 168, 58, 0.08);
 }
 
 .inline-msg {
@@ -811,7 +812,7 @@ button.stat:hover {
 
 .status-icon.running {
   background: var(--warn);
-  box-shadow: 0 0 0 0 rgba(255, 176, 32, 0.6);
+  box-shadow: 0 0 0 0 rgba(232, 168, 58, 0.6);
   animation: pulse 1.4s infinite;
 }
 
@@ -830,10 +831,10 @@ button.stat:hover {
 
 @keyframes pulse {
   70% {
-    box-shadow: 0 0 0 8px rgba(255, 176, 32, 0);
+    box-shadow: 0 0 0 8px rgba(232, 168, 58, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(255, 176, 32, 0);
+    box-shadow: 0 0 0 0 rgba(232, 168, 58, 0);
   }
 }
 
@@ -849,7 +850,7 @@ button.stat:hover {
 .progress > i {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), #4ec9ff);
+  background: var(--accent);
   transition: width 0.4s ease;
 }
 
@@ -977,8 +978,8 @@ button.stat:hover {
 }
 
 .favorite-btn.on {
-  background: rgba(255, 92, 114, 0.14);
-  border-color: rgba(255, 92, 114, 0.5);
+  background: rgba(240, 89, 109, 0.14);
+  border-color: rgba(240, 89, 109, 0.5);
 }
 
 @media (max-width: 720px) {

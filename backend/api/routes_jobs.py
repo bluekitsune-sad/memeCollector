@@ -6,7 +6,9 @@
   (started by ``POST /api/scrape``). The action is *no-op-safe* everywhere
   else: finished or stale crawl rows and other job types (thumbnail/dup_scan
   run to completion inside their starter task) simply return the unchanged row
-  with ``applied: false``.
+  with ``applied: false`` — except ``cancel`` on a **stale** ``running`` row
+  (no live process behind it, older than the registration grace period), which
+  records the stop so a zombie job can always be cleared from the UI.
 """
 
 from __future__ import annotations
@@ -17,10 +19,17 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from backend.api.schemas import JobActionResponse, JobListResponse, job_from_row
+from backend.database.database import transaction
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+
+#: A ``running`` row younger than this may simply be mid-registration (the live
+#: handle lands right after the row appears — see ``start_crawl``); cancelling
+#: before the grace period passes stays a no-op so that race can never mark a
+#: live crawl cancelled.
+_STALE_GRACE_SECONDS = 5
 
 #: Job statuses written by the job modules (PRD §35/§36 lifecycle).
 JobStatusFilter = Literal["running", "completed", "cancelled", "failed"]
@@ -63,7 +72,15 @@ async def jobs_cancel(request: Request, job_id: int) -> JobActionResponse:
 
 
 def _control(request: Request, job_id: int, action: JobAction) -> JobActionResponse:
-    """Apply ``action`` to a live crawl handle if one exists; never raises for no-ops."""
+    """Apply ``action`` to a live crawl handle if one exists; never raises for no-ops.
+
+    ``cancel`` additionally clears a **stale** ``running`` row: a job whose
+    process died (crash, or a restart before job recovery ran) has no live
+    handle and would otherwise sit at ``running`` forever with no way out from
+    the UI (PRD §36 — the user can always record the stop themselves). The
+    grace period keeps the just-created-row race from ever cancelling a crawl
+    that is about to register its handle.
+    """
     row = request.app.state.db.execute(
         "SELECT * FROM jobs WHERE id = ?", (job_id,)
     ).fetchone()
@@ -84,9 +101,40 @@ def _control(request: Request, job_id: int, action: JobAction) -> JobActionRespo
         row = request.app.state.db.execute(
             "SELECT * FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
+    elif (
+        action == "cancel"
+        and row["status"] == "running"
+        and _is_stale(request.app.state.db, job_id)
+    ):
+        with transaction(request.app.state.db):
+            request.app.state.db.execute(
+                "UPDATE jobs SET status = 'cancelled', "
+                "error = COALESCE(error, 'cancelled: job process no longer running'), "
+                "completed_at = datetime('now') WHERE id = ?",
+                (job_id,),
+            )
+        row = request.app.state.db.execute(
+            "SELECT * FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        applied = True
+        logger.info("stale running job cancelled by user job_id=%d", job_id)
     else:
         logger.info(
             "job control no-op action=%s job_id=%d job_type=%s live_handle=%s",
             action, job_id, row["job_type"], job is not None,
         )
     return JobActionResponse(job=job_from_row(row), applied=applied)
+
+
+def _is_stale(db, job_id: int) -> bool:
+    """True when a ``running`` row is old enough that its handle cannot still be registering."""
+    row = db.execute(
+        "SELECT started_at FROM jobs WHERE id = ?", (job_id,)
+    ).fetchone()
+    if row is None or row["started_at"] is None:
+        return True
+    registering = db.execute(
+        "SELECT 1 FROM jobs WHERE id = ? AND started_at > datetime('now', ?)",
+        (job_id, f"-{_STALE_GRACE_SECONDS} seconds"),
+    ).fetchone()
+    return registering is None

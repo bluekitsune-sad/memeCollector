@@ -49,7 +49,7 @@ import logging
 import os
 import shutil
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -238,8 +238,16 @@ def count_media(conn: sqlite3.Connection, filters: MediaFilters | None = None) -
 def count_by_dup_status(
     conn: sqlite3.Connection, filters: MediaFilters | None = None
 ) -> dict[str, int]:
-    """Dup breakdown of the filtered set — always all three PRD §12.1 keys."""
-    clause, params = _where(filters if filters is not None else MediaFilters())
+    """Dup breakdown of the filtered set — always all three PRD §12.1 keys.
+
+    Faceted counting: the ``dup_status`` filter itself is ignored, so clicking
+    one Dup badge never zeroes the other badges (the strip keeps showing the
+    full breakdown of everything else that matches the remaining filters).
+    """
+    active = filters if filters is not None else MediaFilters()
+    if active.dup_status is not None:
+        active = replace(active, dup_status=None)
+    clause, params = _where(active)
     rows = conn.execute(
         f"SELECT m.dup_status, COUNT(*) AS n FROM media m {clause} GROUP BY m.dup_status",
         params,
@@ -255,9 +263,14 @@ def count_by_processing_status(
 
     ``processing`` is everything still moving through the queue
     (``DOWNLOADED``, ``ANALYZING``, ``ANALYZED``, ``EMBEDDING``) so the three
-    buckets always sum to the filtered total.
+    buckets always sum to the filtered total. Faceted counting: the
+    ``processing_status`` filter itself is ignored so the three buckets never
+    collapse to a single one while a status filter is applied.
     """
-    clause, params = _where(filters if filters is not None else MediaFilters())
+    active = filters if filters is not None else MediaFilters()
+    if active.processing_status is not None:
+        active = replace(active, processing_status=None)
+    clause, params = _where(active)
     rows = conn.execute(
         f"SELECT m.processing_status, COUNT(*) AS n FROM media m {clause} "
         "GROUP BY m.processing_status",

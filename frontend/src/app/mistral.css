@@ -1,0 +1,535 @@
+/* =============================================================================
+   mistral.css — Mistral-AI-inspired global skin for MemeVault (dark only).
+   Imported AFTER globals.css (see layout.tsx) so every rule here wins the
+   cascade over the legacy theme. There is exactly one palette: a near-black
+   background with off-white type and the #ff4f00 orange accent.
+
+   Structure:
+     1. GLOBAL THEME — the single dark palette applied across the app.
+     2. RECONCILIATION  — the existing components were written against
+        globals.css (tokens, square buttons, class-scoped styles).
+        This section re-maps those tokens to the dark palette and patches
+        the handful of spots where the generic spec selectors would break a
+        real control. Components keep their structure; only the skin changes.
+     3. PIXEL-ART FLOURISHES — dot-grid texture, stepped hard shadows,
+        stepped focus ring, 8-bit caret, .pixel-art utility.
+   ============================================================================= */
+
+/* =========================================================
+   1. GLOBAL DARK THEME
+   ========================================================= */
+
+:root {
+  --mistral-bg: #171717;
+  --mistral-surface: #1e1e1c;
+  --mistral-surface-alt: #242422;
+  --mistral-text: #f7f7f5;
+  --mistral-muted: #9b9b97;
+  --mistral-border: #363633;
+  /* The "ink" outline of the spec — off-white on the dark palette. */
+  --mistral-border-dark: #e8e8e3;
+  --mistral-accent: #ff4f00;
+  --mistral-accent-hover: #e94500;
+  --mistral-radius: 12px;
+  --mistral-radius-sm: 7px;
+  --mistral-radius-pill: 999px;
+  --mistral-shadow: 0 1px 2px rgba(0,0,0,.30);
+  --mistral-shadow-hover: 0 8px 30px rgba(0,0,0,.45);
+  --mistral-max-width: 1280px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--mistral-bg);
+  color: var(--mistral-text);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,h2,h3,h4,h5,h6 { margin-top: 0; color: var(--mistral-text); font-weight: 600; letter-spacing: -0.035em; }
+h1 { font-size: clamp(2.75rem, 6vw, 5.5rem); line-height: .95; }
+h2 { font-size: clamp(2rem, 4vw, 3.5rem); line-height: 1; }
+h3 { font-size: 1.5rem; line-height: 1.1; }
+p { color: var(--mistral-muted); }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--mistral-accent); }
+
+main, section, .container, .wrapper { position: relative; }
+.container, .wrapper { width: min(calc(100% - 48px), var(--mistral-max-width)); margin-inline: auto; }
+section { padding-block: 96px; }
+
+nav, .navbar, header {
+  background: rgba(23,23,23,.88);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--mistral-border);
+  position: relative;
+  z-index: 100;
+}
+nav a, .navbar a { font-size: 14px; font-weight: 500; transition: color .2s ease, opacity .2s ease; }
+nav a:hover, .navbar a:hover { color: var(--mistral-accent); }
+
+.card, [class*="card"], [class*="Card"] {
+  background: var(--mistral-surface);
+  border: 1px solid var(--mistral-border);
+  border-radius: var(--mistral-radius);
+  box-shadow: var(--mistral-shadow);
+  transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+.card:hover, [class*="card"]:hover, [class*="Card"]:hover {
+  transform: translateY(-2px);
+  border-color: #4d4d4a;
+  box-shadow: var(--mistral-shadow-hover);
+}
+
+.interaction, .chat-box, .prompt-box, .input-box, .composer, .search-box {
+  background: var(--mistral-surface);
+  border: 1px solid var(--mistral-border-dark);
+  border-radius: var(--mistral-radius);
+  padding: 16px;
+  box-shadow: 0 1px 1px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.4);
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.interaction:focus-within, .chat-box:focus-within, .prompt-box:focus-within,
+.input-box:focus-within, .composer:focus-within, .search-box:focus-within {
+  border-color: var(--mistral-accent);
+  box-shadow: 0 0 0 3px rgba(255,79,0,.14);
+}
+
+input, textarea, select {
+  width: 100%;
+  background: var(--mistral-surface);
+  color: var(--mistral-text);
+  border: 1px solid var(--mistral-border);
+  border-radius: var(--mistral-radius-sm);
+  padding: 12px 14px;
+  font: inherit;
+  outline: none;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+input:hover, textarea:hover, select:hover { border-color: #6b6b67; }
+input:focus, textarea:focus, select:focus { border-color: var(--mistral-accent); box-shadow: 0 0 0 3px rgba(255,79,0,.14); }
+textarea { min-height: 120px; resize: vertical; }
+
+button, .btn, .button {
+  appearance: none;
+  border: 1px solid var(--mistral-border-dark);
+  background: transparent;
+  color: var(--mistral-text);
+  border-radius: var(--mistral-radius-pill);
+  padding: 10px 18px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .2s ease, color .2s ease, border-color .2s ease, transform .15s ease, box-shadow .2s ease;
+}
+button:hover, .btn:hover, .button:hover { background: var(--mistral-accent); border-color: var(--mistral-accent); color: #fff; transform: translateY(-1px); }
+button:active, .btn:active, .button:active { transform: translateY(0); }
+button.secondary, .btn.secondary, .button.secondary, .btn-outline, .button-outline { background: transparent; color: var(--mistral-text); border-color: var(--mistral-border-dark); }
+button.secondary:hover, .btn.secondary:hover, .button.secondary:hover, .btn-outline:hover, .button-outline:hover { background: var(--mistral-text); color: var(--mistral-bg); }
+.btn-primary, .button-primary, .primary { background: var(--mistral-accent); border-color: var(--mistral-accent); color: #fff; }
+.btn-primary:hover, .button-primary:hover, .primary:hover { background: var(--mistral-accent-hover); border-color: var(--mistral-accent-hover); }
+
+.badge, .tag, .pill, .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--mistral-border); background: var(--mistral-surface); border-radius: var(--mistral-radius-pill); padding: 5px 10px; color: var(--mistral-muted); font-size: 12px; font-weight: 500; }
+
+.grid { display: grid; gap: 20px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+
+hr { height: 1px; margin-block: 32px; border: 0; background: var(--mistral-border); }
+
+table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; background: var(--mistral-surface); border: 1px solid var(--mistral-border); border-radius: var(--mistral-radius); }
+th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid var(--mistral-border); }
+th { background: var(--mistral-surface-alt); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+tr:last-child td { border-bottom: 0; }
+
+pre, code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+pre { overflow-x: auto; background: #111110; color: #f5f5f5; border-radius: var(--mistral-radius); padding: 20px; border: 1px solid var(--mistral-border); }
+code { font-size: .9em; }
+
+.message, .chat-message, .ai-message, .user-message { padding: 18px 20px; border-radius: var(--mistral-radius); margin-bottom: 12px; }
+.ai-message { background: var(--mistral-surface); border: 1px solid var(--mistral-border); }
+.user-message { background: var(--mistral-text); color: var(--mistral-bg); margin-left: auto; max-width: 80%; }
+
+aside, .sidebar { background: var(--mistral-surface-alt); border-right: 1px solid var(--mistral-border); }
+.sidebar-item { display: flex; align-items: center; padding: 10px 12px; border-radius: var(--mistral-radius-sm); color: var(--mistral-muted); transition: background .2s ease, color .2s ease; }
+.sidebar-item:hover { background: #2e2e2c; color: var(--mistral-text); }
+.sidebar-item.active { background: #2e2e2c; color: var(--mistral-text); border: 1px solid var(--mistral-border); }
+
+.icon-button { width: 40px; height: 40px; display: inline-grid; place-items: center; padding: 0; border-radius: 50%; background: transparent; color: var(--mistral-text); border: 1px solid var(--mistral-border); }
+.icon-button:hover { background: var(--mistral-text); color: var(--mistral-bg); }
+
+.modal, .dropdown, .popover { background: var(--mistral-surface); border: 1px solid var(--mistral-border); border-radius: var(--mistral-radius); box-shadow: 0 16px 50px rgba(0,0,0,.55); overflow: hidden; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--mistral-bg); }
+::-webkit-scrollbar-thumb { background: #4a4a47; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #6e6e69; }
+::selection { background: var(--mistral-accent); color: #fff; }
+
+@media (max-width: 900px) {
+  section { padding-block: 64px; }
+  .container, .wrapper { width: min(calc(100% - 32px), var(--mistral-max-width)); }
+  .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width: 600px) {
+  h1 { font-size: 3rem; }
+  h2 { font-size: 2.25rem; }
+  section { padding-block: 48px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .user-message { max-width: 92%; }
+}
+
+/* =========================================================
+   2. RECONCILIATION WITH THE EXISTING APP
+   ========================================================= */
+
+/* --- 2a. Legacy component tokens → dark palette ---------------------------
+   globals.css styles every component through these custom properties
+   (--bg-raised card surfaces, --text-dim secondary text, tone colors…).
+   Re-pointing them here maps the whole component library to the dark
+   palette without touching a single component. Tone colors are lightened
+   because their dark tint backgrounds stay the same. */
+:root {
+  --bg: var(--mistral-bg);
+  --bg-raised: var(--mistral-surface);
+  --bg-sunken: #111110;
+  --bg-hover: #2a2a28;
+  --border: var(--mistral-border);
+  --border-strong: #55554f;
+  --text: var(--mistral-text);
+  --text-dim: #b8b8b2;
+  --text-faint: #8f8f8a;
+  --accent: var(--mistral-accent);
+  --accent-hover: var(--mistral-accent-hover);
+  --accent-soft: rgba(255, 79, 0, 0.16);
+  --ok: #45c98a;
+  --warn: #e8a83a;
+  --danger: #f0596d;
+  --radius: var(--mistral-radius);
+  --shadow: var(--mistral-shadow);
+}
+
+/* --- 2b. Typography ------------------------------------------------------
+   The spec's h1 clamp (up to 5.5rem) is landing-page scale; our h1s are
+   app page titles, so bound .page-title to an editorial-but-sane range.
+   Panel headings keep their compact role, just with better tracking. */
+.page-title {
+  font-size: clamp(1.75rem, 3vw, 2.75rem);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+}
+
+.panel h2 {
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+/* --- 2c. App shell -------------------------------------------------------
+   .app-header (0,1,0) beats the spec's bare `header` rule, so the bar has
+   to be re-skinned explicitly. Sticky positioning and the border from
+   globals.css already survive. */
+.app-header {
+  background: rgba(23, 23, 23, 0.88);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+/* More breathing room now that the page is dark and editorial. */
+.app-main {
+  padding: 28px 24px 72px;
+}
+
+@media (max-width: 720px) {
+  .app-main {
+    padding: 16px 14px 48px;
+  }
+}
+
+/* The spec styles bare <nav> as a standalone toolbar; in this app the
+   navs are layout containers (main nav, pagination) nested inside other
+   bars, so strip the duplicate background/border off them. */
+.app-header .nav,
+.pagination {
+  background: none;
+  border-bottom: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  z-index: auto;
+}
+
+/* Per spec: nav links turn orange on hover. Active link keeps its tint
+   (and stays legible when hovered). */
+.nav-link:hover {
+  background: transparent;
+  color: var(--mistral-accent);
+}
+
+.nav-link.active:hover {
+  color: var(--mistral-text);
+}
+
+/* --- 2d. Buttons ---------------------------------------------------------
+   globals.css wins the base .btn look (it is a class rule); restate it as
+   pill controls per the spec. Default = dark pill with an off-white ink
+   outline that flips to solid off-white on hover (the spec's
+   .btn-outline behaviour, inverted for the dark palette); .primary = the
+   orange accent button. Disabled states keep the legacy opacity treatment
+   and are excluded from :hover rules. */
+.btn,
+.button {
+  border-radius: var(--mistral-radius-pill);
+  background: var(--mistral-surface);
+  border-color: var(--mistral-border-dark);
+  color: var(--mistral-text);
+  font-weight: 500;
+}
+
+.btn:hover:not(:disabled),
+.button:hover:not(:disabled) {
+  background: var(--mistral-text);
+  border-color: var(--mistral-text);
+  color: var(--mistral-bg);
+  transform: translateY(-1px);
+}
+
+.btn.small,
+.button.small {
+  border-radius: var(--mistral-radius-pill);
+  padding: 5px 12px;
+}
+
+.btn.primary,
+.button.primary {
+  background: var(--mistral-accent);
+  border-color: var(--mistral-accent);
+  color: #fff;
+}
+
+.btn.primary:hover:not(:disabled),
+.button.primary:hover:not(:disabled) {
+  background: var(--mistral-accent-hover);
+  border-color: var(--mistral-accent-hover);
+  color: #fff;
+}
+
+/* The spinner sits inside both light and orange buttons — derive it from
+   the button's own text color instead of a fixed token. */
+.spinner {
+  border-color: rgba(127, 127, 127, 0.35);
+  border-top-color: currentColor;
+}
+
+/* --- 2e. Small controls the spec's global selectors would break ---------- */
+/* Chip remove (×): the spec turns bare buttons into light-outline pills;
+   the × must stay a tiny inline affordance (globals keeps its base styles). */
+.chip button:hover {
+  background: transparent;
+  color: var(--mistral-accent);
+}
+
+/* Favorite toggle sets a background but no color — pin its text and border
+   to the dark palette explicitly. */
+.favorite-btn {
+  color: var(--mistral-text);
+  border-radius: var(--mistral-radius-pill);
+  background: var(--mistral-surface);
+  border-color: var(--mistral-border-dark);
+}
+
+/* Spec's global `input` rule would stretch the force-rescan checkbox to
+   full width with 12px padding. Pin it back to a normal box. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  border-radius: 3px;
+  box-shadow: none;
+  accent-color: var(--mistral-accent);
+  cursor: pointer;
+}
+
+/* --- 2f. Cards -----------------------------------------------------------
+   The spec's [class*="card"] matches every .card-* CHILD inside a gallery
+   card too (media well, body, badges, score…), giving each of them a card
+   background, a border and a hover lift. Strip that chrome back off
+   the children, then restore their own surfaces. */
+.card-media,
+.card-placeholder,
+.card-badges,
+.card-heart,
+.card-score,
+.card-body,
+.card-title,
+.card-meta {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.card-media:hover,
+.card-placeholder:hover,
+.card-badges:hover,
+.card-heart:hover,
+.card-score:hover,
+.card-body:hover,
+.card-title:hover,
+.card-meta:hover {
+  transform: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* Restored child surfaces (these rules come after the strip above). */
+.card-media {
+  background: #0d0d0d;
+}
+
+.card-score {
+  background: rgba(0, 0, 0, 0.72);
+  color: #eeeeee;
+}
+
+.card-placeholder {
+  color: #b9b9b0;
+}
+
+/* Loading skeletons also contain "card" in their class name — the spec's
+   card background would kill their shimmer gradient. */
+.skeleton.card-skeleton {
+  background: linear-gradient(100deg, var(--bg-raised) 40%, var(--bg-hover) 50%, var(--bg-raised) 60%);
+  background-size: 200% 100%;
+  border: 0;
+  box-shadow: none;
+  border-radius: var(--radius);
+}
+
+/* --- 2g. Component patches for the dark palette -------------------------- */
+/* Bare `aside` would paint a toolbar-style strip behind the detail column. */
+aside.detail-side {
+  background: transparent;
+  border-right: 0;
+}
+
+/* Error panel tinted for the dark background. */
+.error-panel {
+  background: rgba(240, 89, 109, 0.10);
+  border-color: rgba(240, 89, 109, 0.45);
+  color: #ff9aa8;
+}
+
+/* GIF badge text was a dark-on-light cyan. */
+.badge.gif {
+  color: #6cc8ec;
+  border-color: rgba(108, 200, 236, 0.45);
+}
+
+/* Inline title editor: give hover/focus a visible fill now that panels are
+   dark-on-dark. */
+.detail-title:hover,
+.detail-title:focus {
+  background: var(--mistral-surface-alt);
+}
+
+/* Old purple→cyan progress fill; keep everything on the orange accent. */
+.progress > i {
+  background: var(--mistral-accent);
+}
+
+/* =========================================================
+   3. PIXEL-ART FLOURISHES
+   ========================================================= */
+
+/* --- 3a. Dot-grid texture (1px dots on an 8px grid, ~5% light ink) --------
+   `html body` doubles the specificity of globals.css's `html, body`
+   background shorthand so the pattern survives the cascade. The pattern
+   only shows through gutters — cards and panels paint over it. */
+html body {
+  background-color: var(--mistral-bg);
+  background-image: radial-gradient(rgba(247, 247, 245, 0.05) 1px, transparent 1px);
+  background-size: 8px 8px;
+}
+
+/* --- 3b. Stepped hard shadows (4px 4px 0, no blur) ----------------------
+   Base state keeps the spec's whisper-soft shadow at a distance; hover
+   and primary controls snap to a hard, offset, 8-bit shadow. */
+.card {
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+.card:hover {
+  box-shadow: 5px 5px 0 #000;
+}
+
+.panel,
+.filters,
+.job-row {
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.3);
+}
+
+.btn.primary,
+.button.primary {
+  box-shadow: 4px 4px 0 #000;
+}
+
+.btn.primary:hover:not(:disabled),
+.button.primary:hover:not(:disabled) {
+  box-shadow: 1px 1px 0 #000;
+}
+
+/* --- 3c. Stepped focus ring (hard light ring + hard orange halo) ---------
+   Two zero-blur rings read as a stepped pixel outline instead of the
+   legacy blurry accent glow. Restated for inputs because the spec's
+   `input:focus` rule is more specific than :focus-visible. */
+:focus-visible {
+  outline: 2px solid var(--mistral-border-dark);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--mistral-bg), 0 0 0 6px var(--mistral-accent);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  box-shadow: 0 0 0 2px var(--mistral-bg), 0 0 0 6px var(--mistral-accent);
+}
+
+/* --- 3d. 8-bit caret ---------------------------------------------------- */
+input,
+textarea {
+  caret-color: var(--mistral-accent);
+}
+
+/* --- 3e. Pixel brand mark sizing ---------------------------------------- */
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  background: none;
+  color: inherit;
+}
+
+.brand-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* --- 3f. Opt-in pixelated image scaling ---------------------------------
+   Never applied globally — only to elements that explicitly carry the
+   .pixel-art class (low-resolution meme thumbnails/detail previews). */
+.pixel-art {
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}

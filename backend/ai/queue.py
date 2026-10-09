@@ -45,6 +45,18 @@ transaction — never held across an ``await``)::
   ``FAILED`` with reason ``"video analysis not supported"``; they never get an
   ``ai_metadata`` row and are not claimed again (``FAILED`` is terminal for the
   queue; retry via :func:`process_single_media`).
+* **revive** — a terminally ``FAILED`` item whose failure was *retryable*
+  (budget spent on 429/5xx/timeout/malformed answers, or an unexpected
+  pipeline error) gets an automatic **second try**: ``_mark_failed`` parks a
+  revive deadline ``ai_next_retry_at = now + ai.revive_after_seconds`` on the
+  row, and :func:`revive_due_failures` (run by the AI supervisor each tick)
+  flips the row back to ``ANALYZED``/``DOWNLOADED`` with a fresh attempt
+  budget once it passes. ``ai_revives`` caps this at ``ai.max_item_revives``
+  per item so a deterministic failure cannot cycle forever; success (``READY``)
+  and a manual reanalyze reset the whole slate. Permanent failures (video, bad
+  key, unknown model) never schedule a deadline — they stay ``FAILED`` until
+  reanalyzed by hand. The deadline is also what ``/api/ai/status`` counts down
+  (``on_hold`` → ``retry_in_seconds``).
 * **errors** — any per-item exception ends in ``FAILED`` + reason in the
   returned summary, the logs, and the jobs ``message`` counters
   (``last_error=…``, since the schema has no per-media error column); retryable
@@ -262,7 +274,8 @@ async def process_single_media(
     with transaction(conn):
         conn.execute(
             "UPDATE media SET processing_status = 'ANALYZING', "
-            "ai_attempts = 0, ai_next_retry_at = NULL WHERE id = ?",
+            "ai_attempts = 0, ai_next_retry_at = NULL, "
+            "ai_failed_at = NULL, ai_error_retryable = 0, ai_revives = 0 WHERE id = ?",
             (media_id,),
         )
     return await _process(
@@ -336,7 +349,7 @@ async def _process(
     try:
         if is_video(mime_type, extension):
             logger.info("video skipped by ai queue media_id=%d", media_id)
-            _set_status(db, media_id, "FAILED")
+            _mark_failed(db, media_id, retryable=False, settings=settings)
             return ProcessResult(media_id, "FAILED", error=VIDEO_UNSUPPORTED_REASON)
         if not _has_analysis(db, media_id):
             analysis = await _analyze_file(Path(file_path), mime_type, extension, provider)
@@ -371,11 +384,16 @@ async def _process(
         if exc.retryable:
             reason = f"{reason} (attempts={attempts + 1} of {settings.ai.max_item_attempts})"
         logger.warning("ai processing failed media_id=%d reason=%s", media_id, reason)
+        _mark_failed(db, media_id, retryable=exc.retryable, settings=settings)
+        return ProcessResult(media_id, "FAILED", error=reason)
     except Exception as exc:
         reason = f"{type(exc).__name__}: {exc}"
         logger.exception("unexpected ai pipeline error media_id=%d", media_id)
-    _set_status(db, media_id, "FAILED")
-    return ProcessResult(media_id, "FAILED", error=reason)
+        # Unknown errors get the benefit of the doubt: they may well be
+        # transient (sqlite hiccup, decode flake), and the ``max_item_revives``
+        # cap keeps a deterministic bug from cycling forever.
+        _mark_failed(db, media_id, retryable=True, settings=settings)
+        return ProcessResult(media_id, "FAILED", error=reason)
 
 
 async def _analyze_file(
@@ -475,6 +493,79 @@ def _set_status(db: sqlite3.Connection, media_id: int, status: str) -> None:
         db.execute("UPDATE media SET processing_status = ? WHERE id = ?", (status, media_id))
 
 
+def _mark_failed(
+    db: sqlite3.Connection,
+    media_id: int,
+    *,
+    retryable: bool,
+    settings: Settings,
+) -> None:
+    """Terminal ``FAILED`` plus revival bookkeeping (module docstring — revive rules).
+
+    Records *when* the item failed and *which class* of failure it was, so the
+    supervisor can hand retryable failures (429/5xx/timeout/malformed, budget
+    spent) a second try: a retryable failure schedules its revive deadline
+    ``ai_next_retry_at = now + settings.ai.revive_after_seconds``, unless the
+    item already spent its ``ai.max_item_revives`` budget — that deadline is
+    what :func:`revive_due_failures` watches. Permanent causes (video, bad key,
+    unknown model) clear the deadline instead: those are only retried by a
+    manual reanalyze, which resets the whole slate.
+    """
+    row = db.execute("SELECT ai_revives FROM media WHERE id = ?", (media_id,)).fetchone()
+    revives = int(row["ai_revives"]) if row is not None else 0
+    schedule = retryable and revives < settings.ai.max_item_revives
+    with transaction(db):
+        if schedule:
+            db.execute(
+                "UPDATE media SET processing_status = 'FAILED', "
+                "ai_failed_at = datetime('now'), ai_error_retryable = 1, "
+                "ai_next_retry_at = datetime('now', '+' || ? || ' seconds') "
+                "WHERE id = ?",
+                (int(max(0.0, settings.ai.revive_after_seconds)), media_id),
+            )
+        else:
+            db.execute(
+                "UPDATE media SET processing_status = 'FAILED', "
+                "ai_failed_at = datetime('now'), ai_error_retryable = ?, "
+                "ai_next_retry_at = NULL WHERE id = ?",
+                (1 if retryable else 0, media_id),
+            )
+
+
+def revive_due_failures(db: sqlite3.Connection, settings: Settings) -> int:
+    """Second try for terminally-failed items (module docstring — revive rules).
+
+    Flips every ``FAILED`` row whose *retryable* failure's revive deadline has
+    passed back into the claimable state — ``ANALYZED`` when vision already
+    produced metadata (only the embedding is redone), ``DOWNLOADED`` otherwise
+    — with a fresh ``max_item_attempts`` budget; ``ai_revives`` counts the usage
+    against ``ai.max_item_revives``. Rows that failed permanently (video/bad
+    key/unknown model) or spent their revive budget keep their status. Returns
+    the number of items revived. Called by the AI supervisor on every tick.
+    """
+    with transaction(db):
+        rows = db.execute(
+            "SELECT id FROM media "
+            "WHERE processing_status = 'FAILED' AND ai_error_retryable = 1 "
+            "AND ai_next_retry_at IS NOT NULL AND ai_next_retry_at <= datetime('now') "
+            "AND ai_revives < ?",
+            (settings.ai.max_item_revives,),
+        ).fetchall()
+        for row in rows:
+            db.execute(
+                "UPDATE media SET processing_status = "
+                "CASE WHEN EXISTS (SELECT 1 FROM ai_metadata WHERE media_id = media.id) "
+                "THEN 'ANALYZED' ELSE 'DOWNLOADED' END, "
+                "ai_attempts = 0, ai_next_retry_at = NULL, "
+                "ai_failed_at = NULL, ai_error_retryable = 0, "
+                "ai_revives = ai_revives + 1 WHERE id = ?",
+                (row["id"],),
+            )
+    if rows:
+        logger.info("ai failed items revived count=%d", len(rows))
+    return len(rows)
+
+
 def _load_attempts(db: sqlite3.Connection, media_id: int) -> int:
     """Spent retry budget of one item (0 when the row vanished — upstream guards it)."""
     row = db.execute("SELECT ai_attempts FROM media WHERE id = ?", (media_id,)).fetchone()
@@ -543,7 +634,9 @@ def _store_embedding(
     """Persist the embedding BLOB and flip ``EMBEDDING → READY`` in one transaction.
 
     ``READY`` also clears the retry budget (``ai_attempts``/``ai_next_retry_at``)
-    so a future manual reanalyze starts from a clean slate.
+    and the revive slate (``ai_failed_at``/``ai_error_retryable``/``ai_revives``)
+    so a future failure starts a fresh second-try cycle and a manual reanalyze
+    starts from a clean slate.
     """
     blob = serialize_embedding(_validate_embedding(vector))
     with transaction(db):
@@ -553,7 +646,8 @@ def _store_embedding(
         )
         db.execute(
             "UPDATE media SET processing_status = 'READY', "
-            "ai_attempts = 0, ai_next_retry_at = NULL WHERE id = ?",
+            "ai_attempts = 0, ai_next_retry_at = NULL, "
+            "ai_failed_at = NULL, ai_error_retryable = 0, ai_revives = 0 WHERE id = ?",
             (media_id,),
         )
 

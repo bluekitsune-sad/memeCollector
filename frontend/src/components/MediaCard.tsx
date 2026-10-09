@@ -38,6 +38,7 @@ export default function MediaCard({ item, showScore = false }: MediaCardProps) {
             alt={alt}
             loading="lazy"
             decoding="async"
+            className="pixel-art"
             onError={() => setThumbFailed(true)}
           />
         )}
