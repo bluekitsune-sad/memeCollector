@@ -155,6 +155,9 @@ class BackfillJob:
             self._finish_row(db, "failed", error=f"discovery failed: {exc}")
             logger.warning("backfill discovery failed backfill_id=%d error=%s", self._backfill_id, exc)
             return BackfillSummary(backfill_id=int(self._backfill_id), failed=1)
+        # A resumed run inherits counters from item truth (e.g. comics finished
+        # by a previous incarnation whose row sync predates this code path).
+        self._sync_counts(db)
         while not (self._cancelled or self._stopping):
             if not await self._wait_until_runnable():
                 break
@@ -162,6 +165,7 @@ class BackfillJob:
             if item is None:
                 break
             await self._crawl_comic(db, item)
+            self._sync_counts(db)
             await self._rest_between_comics()
         return self._finish(db)
 
@@ -387,6 +391,20 @@ class BackfillJob:
                 "backfill requeued interrupted comics backfill_id=%d count=%d",
                 self._backfill_id, cursor.rowcount,
             )
+
+    def _sync_counts(self, db: sqlite3.Connection) -> None:
+        """Mirror item truth onto the row after every comic.
+
+        Without this the row's ``done``/``failed`` counters would only be
+        written at run end, and the Jobs-tab progress bar would lag the count
+        chips by one comic for the whole run.
+        """
+        row = db.execute(
+            "SELECT SUM(status = 'done') AS done, SUM(status = 'failed') AS failed "
+            "FROM backfill_items WHERE backfill_id = ?",
+            (self._backfill_id,),
+        ).fetchone()
+        self._update_row(db, done=int(row["done"] or 0), failed=int(row["failed"] or 0))
 
     def _update_row(self, db: sqlite3.Connection, **fields: object) -> None:
         """Persist progress fields; telemetry failures are logged, never fatal (PRD §36)."""

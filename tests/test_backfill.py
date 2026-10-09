@@ -257,6 +257,9 @@ def test_pause_holds_the_run_until_resumed(db, tmp_path: Path) -> None:
             job.pause()
             await asyncio.sleep(0.2)
             running = _row(db, job.backfill_id)["status"]
+            # Counts sync after every comic, not just at run end — the row's
+            # progress must reflect the finished comic while the run is live.
+            assert _row(db, job.backfill_id)["done"] >= 1
             remaining = db.execute(
                 "SELECT COUNT(*) FROM backfill_items WHERE backfill_id = ? "
                 "AND status IN ('pending', 'running')",
