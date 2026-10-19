@@ -33,12 +33,17 @@ from backend.scraper.adapters.base import (
 
 logger = logging.getLogger(__name__)
 
-# One line per site module (MVP: asurascans, mangadex, mangapark, comix — PRD §0).
+# One line per site module (MVP: asurascans, mangadex, mangapark, comix — PRD §0;
+# added 2026-10-13: thunderscans, flamecomics, vortexscans, hivetoons).
 _SITE_MODULES: tuple[str, ...] = (
     "asurascans",
     "mangadex",
     "mangapark",
     "comix",
+    "thunderscans",
+    "flamecomics",
+    "vortexscans",
+    "hivetoons",
 )
 
 

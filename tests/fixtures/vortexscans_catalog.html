@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Browse Series - VortexScans</title>
+</head>
+<body class="bg-background text-foreground">
+  <header class="sticky top-0 z-50 border-b bg-card">
+    <a href="/"><img src="/theme/logo/vortex-full.svg" alt="VortexScans"/></a>
+    <nav>
+      <a href="/series">Browse</a>
+      <a href="/latest">Latest</a>
+      <a href="/rankings">Rankings</a>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Browse Series</h1>
+    <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div class="series-card">
+        <a href="/series/contract-killer-enrollment">
+          <img src="https://storage.vortexscans.org/covers/contract-killer-enrollment.jpg" alt=""/>
+          <span class="title">Contract Killer Enrollment</span>
+        </a>
+      </div>
+      <div class="series-card">
+        <a href="/series/hard-carry-supporter">
+          <img src="https://storage.vortexscans.org/covers/hard-carry-supporter.jpg" alt=""/>
+          <span class="title">Hard Carry Supporter</span>
+        </a>
+      </div>
+      <div class="series-card">
+        <a href="/series/the-villains-profiler">
+          <img src="https://storage.vortexscans.org/covers/the-villains-profiler.jpg" alt=""/>
+          <span class="title">The Villain's Profiler</span>
+        </a>
+      </div>
+      <div class="series-card">
+        <a href="/series/martial-god-regressor">
+          <img src="https://storage.vortexscans.org/covers/martial-god-regressor.jpg" alt=""/>
+          <span class="title">Martial God Regressor</span>
+        </a>
+      </div>
+    </div>
+
+    <nav class="pagination" aria-label="pagination">
+      <span class="current">1</span>
+      <a href="/series?page=2">2</a>
+      <a href="/series?page=3">3</a>
+      <a class="next" href="/series?page=2" rel="next">Next</a>
+    </nav>
+  </main>
+
+  <footer>
+    <img src="/theme/logo/vortex-footer.svg" alt=""/>
+  </footer>
+</body>
+</html>
