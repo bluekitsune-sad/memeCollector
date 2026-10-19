@@ -162,6 +162,12 @@ async def test_background_run_reindexes_fts_for_fresh_search(
         await await_until(
             lambda: db.execute("SELECT COUNT(*) FROM media_fts").fetchone()[0] == 1
         )
+        # Wait for the supervisor's own reindex log line BEFORE leaving the
+        # context: cancelling the task between rebuild_fts_index's commit and
+        # its log line dropped the assertion (and left the worker thread using
+        # `db` concurrently with this test) — an order-dependent race that
+        # reproduced under tests/test_ai_status_api.py first.
+        await await_until(lambda: "reindexed fts" in caplog.text)
 
     # The mock description ("Mock image …") is in the FTS index right after the
     # run — not only after some later search self-heal or manual reindex.
