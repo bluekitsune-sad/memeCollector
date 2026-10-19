@@ -81,11 +81,26 @@ Every site adapter implements `SiteAdapter` in `backend/scraper/adapters/base.py
 - `find_comments(page) -> list[Comment]`
 - `find_comment_media(comment) -> list[MediaRef]`
 - `get_comment_metadata(comment) -> CommentMeta`
-- `discover_series(url) -> list[SeriesRef]` — **optional** (base default returns `[]`); expands a catalog URL (e.g. `asurascans.com/comics`) into series links. Used **only** by the site-wide backfill (`backend/jobs/backfill.py`); currently implemented by `asurascans` alone.
+- `discover_series(url) -> list[SeriesRef]` — **optional** (base default returns `[]`); expands a catalog URL (e.g. `asurascans.com/comics`) into series links. Used **only** by the site-wide backfill (`backend/jobs/backfill.py`); implemented by `asurascans`, `flamecomics`, `thunderscans`, `vortexscans`, `hivetoons`.
 
 Registry resolves a URL to an adapter; **if none matches, raise `UnsupportedSiteError`** which the API surfaces as a clear user-facing message ("Site not supported: add an adapter for …"). This is required behavior (PRD §0).
 
 MVP adapters: `asurascans`, `mangadex`, `mangapark`, `comix`.
+Added 2026-10-13: `thunderscans` (en-thunderscans.com — server-rendered mcs comments,
+`render = False`) and `flamecomics` (flamecomics.xyz — client-rendered Mantine comment
+module, `render = True`), plus `vortexscans` (vortexscans.org) and `hivetoons`
+(hivetoons.org) — the same "vortex" white-label platform (hivetoons' build config
+literally carries `SITE_SLUG: "vortexscans"`). These three set
+`scroll_before_capture = True` (the crawler step-scrolls before capture); the vortex
+platform additionally mounts its comment items **only after the floating
+`button[aria-label^="Comments"]` drawer trigger is clicked** (scroll alone → 0 roots),
+so vortexscans/hivetoons also set `click_before_capture = 'button[aria-label^="Comments"]'`
+and the crawler performs a plain DOM click (`page.evaluate`) + 3s settle before capture —
+Playwright's `locator.click` times out on this CSS-animated button (verified live
+2026-10-19; live yield: 24 comments / 5 tenor-GIF attachments on one vortex chapter).
+Sites evaluated and skipped: omegascans.org (unreachable
+from this network: connection reset across httpx, Chromium, and curl — cannot be
+verified).
 
 ## 6. Media Identification Rule (PRD §6 — critical)
 

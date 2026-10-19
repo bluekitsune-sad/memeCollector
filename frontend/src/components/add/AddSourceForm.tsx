@@ -122,8 +122,9 @@ export default function AddSourceForm({ onStarted }: AddSourceFormProps) {
       </div>
 
       <p className="inline-msg" style={{ marginTop: 12 }}>
-        Supported sites: asurascans.com, mangadex.org, mangapark.net, comix.to — anything else is
-        rejected with an explicit message.
+        Supported sites: asurascans.com, mangadex.org, mangapark.net, comix.to, en-thunderscans.com,
+        flamecomics.xyz, vortexscans.org, hivetoons.org — anything else is rejected with an
+        explicit message.
       </p>
     </form>
   );

@@ -11,7 +11,7 @@ Requirements docs (read in this order): `PRD.md` → `AGENTS.md` → `TODO.md`.
 
 ## Features
 
-- **Comment-only collection** — image/GIF/video attachments from the comment sections of four supported sites (AsuraScans, MangaDex, MangaPark, Comix); panels, logos, nav icons and avatars are never downloaded (PRD §6).
+- **Comment-only collection** — image/GIF/video attachments from the comment sections of eight supported sites (AsuraScans, MangaDex, MangaPark, Comix, ThunderScans, FlameComics, VortexScans, HiveToons); panels, logos, nav icons and avatars are never downloaded (PRD §6).
 - **Site-wide backfill** — the Jobs page has a dedicated **Site Backfill** section (above the AI status card): start a catalog crawl (default `asurascans.com/comics`), then pause / resume / cancel / **retry failed** / **run again**, with a progress bar, live counts, the current comic and an expandable per-comic list (PRD §35–36).
 - **Auto-resume after restart** — interrupted crawls and a stranded backfill relaunch themselves on the next boot "when they can" (background task at startup; zombie rows are failed, never wedged — PRD §36).
 - **Resilient AI** — per-item retry with backoff, then an automatic **revive** of retryable failures after `ai.revive_after_seconds` (capped by `ai.max_item_revives`); permanent causes (video, bad key) are never retried; manual Reanalyze resets the slate (PRD §18/§36).
