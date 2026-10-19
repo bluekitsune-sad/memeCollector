@@ -17,9 +17,13 @@ Designed to keep continuing:
   moves on (PRD §36). Crawl cancellation from the Jobs tab is external — that
   comic is marked ``failed`` so the loop cannot spin on it.
 * **Cooperation** — it waits while any crawl it does not own is live
-  (``app.state.running_crawls``) and yields between comics via
+  (:attr:`app.state.running_crawls`) and yields between comics via
   ``backfill.delay_seconds``; pause/resume/cancel are cooperative, like
   :class:`~backend.jobs.crawl_job.CrawlJob`.
+* **Passive rotation** — the ``backfill.targets`` config list cycles whole
+  catalogs one run at a time: startup resumes an interrupted run, and a run
+  that ends naturally is followed by the least-recently-run target
+  (:func:`maybe_start_next_target`).
 
 Its per-comic crawl rows carry ``params.owner='backfill'`` so the generic
 startup crawl resume (:mod:`backend.jobs.resume`) never double-runs them.
@@ -38,11 +42,18 @@ from fastapi import FastAPI
 from backend.database.database import transaction
 from backend.jobs.crawl_job import CrawlJob
 from backend.jobs.pipeline import start_crawl
-from backend.scraper.adapters import CrawlScope, ScopeKind, SiteAdapter, get_adapter
+from backend.scraper.adapters import (
+    CrawlScope,
+    ScopeKind,
+    SiteAdapter,
+    UnsupportedSiteError,
+    get_adapter,
+)
 from backend.security.text import sanitize_optional_text
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard, typing only
     import httpx
+    from backend.config import Settings
     from backend.scraper.crawler import PageFetcher
 
 logger = logging.getLogger(__name__)
@@ -467,11 +478,80 @@ def launch_backfill(app: FastAPI, job: BackfillJob) -> asyncio.Task[None]:
 
 
 async def _run_tracked(app: FastAPI, job: BackfillJob) -> None:
+    summary: BackfillSummary | None = None
     try:
-        await job.run()
+        summary = await job.run()
     finally:
         if live_backfill(app) is job:
             app.state.backfill_job = None
+    if summary is not None and not (summary.cancelled or summary.stopping):
+        # A natural end (completed or every comic recorded) continues the
+        # passive rotation. A user cancel or a server stop does not — the
+        # next boot's resume/rotation decides from there.
+        await _rest_before_rotation(app)
+        maybe_start_next_target(app)
+
+
+async def _rest_before_rotation(app: FastAPI) -> None:
+    """Politeness gap between rotation targets; task cancellation aborts it."""
+    delay = max(0.0, float(app.state.settings.backfill.delay_seconds))
+    if delay:
+        await asyncio.sleep(delay)
+
+
+def next_rotation_target(db: sqlite3.Connection, settings: Settings) -> str | None:
+    """The configured catalog that has run least recently (never ran = oldest).
+
+    Every finished/started run gives its target a newer ``backfill_jobs`` row,
+    so plain "newest row id per target" round-robins the rotation:
+    ``None`` when ``backfill.targets`` is empty.
+    """
+    best_url: str | None = None
+    newest_seen: int | None = None
+    for url in settings.backfill.targets:
+        newest = int(
+            db.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM backfill_jobs WHERE site_url = ?",
+                (url,),
+            ).fetchone()[0]
+        )
+        if newest_seen is None or newest < newest_seen:
+            best_url, newest_seen = url, newest
+    return best_url
+
+
+def maybe_start_next_target(app: FastAPI) -> bool:
+    """Rotation: launch the least-recently-run ``backfill.targets`` entry.
+
+    Called at startup when no interrupted run was resumed
+    (:func:`resume_interrupted_backfill`) and after every run that ends
+    naturally — so configured catalogs keep cycling passively, one at a time.
+    No-op (``False``) when rotation is unconfigured or disabled, a run is
+    already live, a row is stranded ``running`` (the resume path owns it), or
+    the next target has no registered adapter.
+    """
+    settings = app.state.settings
+    if not settings.backfill.enabled:
+        return False
+    if live_backfill(app) is not None:
+        return False
+    stranded = app.state.db.execute(
+        "SELECT id FROM backfill_jobs WHERE status = 'running' ORDER BY id LIMIT 1"
+    ).fetchone()
+    if stranded is not None:
+        return False
+    url = next_rotation_target(app.state.db, settings)
+    if url is None:
+        return False
+    try:
+        get_adapter(url)
+    except UnsupportedSiteError as exc:
+        logger.warning("backfill rotation skips unsupported target url=%s error=%s", url, exc)
+        return False
+    job = BackfillJob(app, url)
+    launch_backfill(app, job)
+    logger.info("backfill rotation started url=%s backfill_id=%s", url, job.backfill_id)
+    return True
 
 
 def resume_interrupted_backfill(app: FastAPI) -> bool:

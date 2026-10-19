@@ -27,6 +27,8 @@ from backend.jobs.backfill import (
     BackfillJob,
     launch_backfill,
     live_backfill,
+    maybe_start_next_target,
+    next_rotation_target,
     resume_interrupted_backfill,
 )
 from backend.main import create_app
@@ -85,6 +87,7 @@ def backfill_settings(tmp_path: Path, **backfill_overrides: Any) -> Settings:
     crawler = replace(base.crawler, delay_seconds=0.0, concurrency=1)
     ai = replace(base.ai, provider="mock")
     watch = replace(base.watch, enabled=False)
+    backfill_overrides.setdefault("targets", [])  # offline by default; rotation tests opt in
     backfill = replace(base.backfill, delay_seconds=0.0, **backfill_overrides)
     return replace(
         base, storage=storage, crawler=crawler, ai=ai, watch=watch, backfill=backfill
@@ -564,3 +567,143 @@ def test_resume_relaunches_a_stranded_row(
         resumed = client.post(f"/api/backfill/{stranded}/resume").json()
         assert resumed["applied"] is True
         assert resumed["backfill"]["live"] is True
+
+
+# ---------------------------------------------------------------------------
+# Passive rotation: config targets cycle one after another
+# ---------------------------------------------------------------------------
+
+#: A second fixture.test catalog — the fake adapter handles any such host.
+OTHER_INDEX = "https://fixture.test/comics-b"
+
+
+def _fixture_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(media_handler(SAMPLE_IMAGES))
+    )
+
+
+def _fixture_job(app, index_url: str, **kwargs) -> BackfillJob:
+    return BackfillJob(
+        app, index_url, fetcher=FixtureFetcher(_pages()),
+        http_client=_fixture_client(), **kwargs,
+    )
+
+
+def test_next_rotation_target_round_robins(db, tmp_path: Path) -> None:
+    settings = backfill_settings(tmp_path, targets=[INDEX_URL, OTHER_INDEX])
+    # Nothing ran yet → the first configured target goes first.
+    assert next_rotation_target(db, settings) == INDEX_URL
+
+    with transaction(db):
+        for url in (INDEX_URL, OTHER_INDEX):
+            db.execute(
+                "INSERT INTO backfill_jobs (site_url, adapter_site, status) "
+                "VALUES (?, 'fixture', 'completed')",
+                (url,),
+            )
+    # Both have run → the older row (INDEX_URL) is least recent again.
+    assert next_rotation_target(db, settings) == INDEX_URL
+
+    with transaction(db):
+        db.execute(
+            "INSERT INTO backfill_jobs (site_url, adapter_site, status) "
+            "VALUES (?, 'fixture', 'completed')",
+            (INDEX_URL,),
+        )
+    # Now OTHER_INDEX is the least-recently-run target.
+    assert next_rotation_target(db, settings) == OTHER_INDEX
+
+    # No targets configured → rotation is off.
+    assert next_rotation_target(db, backfill_settings(tmp_path)) is None
+
+
+def test_maybe_start_next_target_gates(db, tmp_path: Path) -> None:
+    """Idle-without-targets / disabled / stranded-row never launch anything."""
+    assert maybe_start_next_target(state_app(db, backfill_settings(tmp_path))) is False
+
+    disabled = state_app(db, backfill_settings(tmp_path, enabled=False, targets=[INDEX_URL]))
+    assert maybe_start_next_target(disabled) is False
+
+    app = state_app(db, backfill_settings(tmp_path, targets=[INDEX_URL]))
+    _seed_row(db, "running")  # a stranded row belongs to the resume path
+    assert maybe_start_next_target(app) is False
+    assert live_backfill(app) is None
+
+
+def test_maybe_start_next_target_launches_the_least_recent_target(
+    db, tmp_path: Path
+) -> None:
+    settings = backfill_settings(tmp_path, targets=[INDEX_URL, OTHER_INDEX])
+    app = state_app(db, settings)
+
+    async def scenario() -> tuple[int, int]:
+        with registered(_adapter()):
+            assert maybe_start_next_target(app) is True
+            live = live_backfill(app)
+            assert live is not None
+            assert live._index_url == INDEX_URL
+            assert live.backfill_id is not None
+            # Exactly one run at a time: a second call while live is a no-op.
+            assert maybe_start_next_target(app) is False
+            live.stop()  # keep the launched task from crawling anything
+            task = getattr(app.state, "backfill_task", None)
+            if task is not None:
+                await task
+            return live.backfill_id, 0
+
+    backfill_id, _ = asyncio.run(scenario())
+    row = _row(db, backfill_id)
+    assert row["site_url"] == INDEX_URL
+    # Stopped, not finished — the row stays 'running' for the next resume.
+    assert row["status"] == "running"
+
+
+def test_naturally_ended_run_continues_the_rotation(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A completed run auto-starts the next target — and stops after one hop."""
+    import backend.jobs.backfill as backfill_module
+
+    created: list[BackfillJob] = []
+
+    class _RotatingJob(BackfillJob):
+        """Rotation stand-in: fixture wiring, stopped the moment it is created.
+
+        Stopping bounds the rotation to a single hop (``summary.stopping`` ends
+        the next run without chaining further), and subclassing keeps
+        :func:`live_backfill`'s isinstance check working across the patch.
+        """
+
+        def __init__(self, app, index_url, *, backfill_id=None, **kwargs):
+            super().__init__(
+                app, index_url, backfill_id=backfill_id,
+                fetcher=FixtureFetcher(_pages()), http_client=_fixture_client(),
+                **kwargs,
+            )
+            created.append(self)
+            self.stop()
+
+    monkeypatch.setattr(backfill_module, "BackfillJob", _RotatingJob)
+    settings = backfill_settings(tmp_path, targets=[INDEX_URL, OTHER_INDEX])
+    app = state_app(db, settings)
+
+    async def scenario() -> int:
+        with registered(_adapter()):
+            first = _fixture_job(app, INDEX_URL)
+            launch_backfill(app, first)
+            task = getattr(app.state, "backfill_task", None)
+            await task
+            rotation_task = getattr(app.state, "backfill_task", None)
+            if rotation_task is not None and rotation_task is not task:
+                await rotation_task
+            assert first.backfill_id is not None
+            return first.backfill_id
+
+    first_id = asyncio.run(scenario())
+    assert _row(db, first_id)["status"] == "completed"
+    # The rotation hopped exactly once, to the other configured target.
+    assert len(created) == 1
+    second = _row(db, created[0].backfill_id)
+    assert second["site_url"] == OTHER_INDEX
+    assert live_backfill(app) is None

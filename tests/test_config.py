@@ -10,7 +10,9 @@ import pytest
 from backend.config.loader import DEFAULT_CONFIG_PATH, PROJECT_ROOT, load_settings
 
 
-def test_loads_yaml_defaults() -> None:
+def test_loads_yaml_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The suite's session guard overrides this key — assert pure YAML here.
+    monkeypatch.delenv("MEME_BACKFILL_TARGETS", raising=False)
     settings = load_settings()
     assert settings.config_path == DEFAULT_CONFIG_PATH
     assert settings.server.host == "127.0.0.1"
@@ -28,6 +30,12 @@ def test_loads_yaml_defaults() -> None:
     backfill = load_settings().backfill
     assert backfill.enabled is True
     assert backfill.delay_seconds == 2.0
+    # Passive rotation of the three proven catalogs (asura + the M7 additions).
+    assert backfill.targets == [
+        "https://asurascans.com/comics",
+        "https://en-thunderscans.com/comics/",
+        "https://flamecomics.xyz/browse",
+    ]
 
 
 def test_search_weights_match_prd_22() -> None:
@@ -86,6 +94,35 @@ def test_env_overrides_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.server.port == 9001
     # Untouched keys keep YAML values.
     assert settings.crawler.concurrency == 2
+
+
+def test_backfill_targets_read_from_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MEME_BACKFILL_TARGETS", raising=False)
+    config_file = tmp_path / "custom.yaml"
+    config_file.write_text(
+        "backfill:\n"
+        "  targets:\n"
+        "    - https://a.example/comics\n"
+        "    - https://b.example/browse\n",
+        encoding="utf-8",
+    )
+    settings = load_settings(config_file)
+    assert settings.backfill.targets == ["https://a.example/comics", "https://b.example/browse"]
+
+
+def test_backfill_targets_default_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MEME_BACKFILL_TARGETS", raising=False)
+    config_file = tmp_path / "custom.yaml"
+    config_file.write_text("server:\n  port: 8001\n", encoding="utf-8")
+    assert load_settings(config_file).backfill.targets == []
+
+
+def test_backfill_targets_env_override_splits_commas(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "MEME_BACKFILL_TARGETS", "https://a.example/comics, https://b.example/browse"
+    )
+    settings = load_settings()
+    assert settings.backfill.targets == ["https://a.example/comics", "https://b.example/browse"]
 
 
 def test_api_key_never_stored_in_yaml() -> None:

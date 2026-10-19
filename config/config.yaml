@@ -46,3 +46,11 @@ backfill:
   enabled: true
   # Pause between comics, on top of each crawl's own crawler.delay_seconds.
   delay_seconds: 2.0
+  # Passive rotation: catalog URLs cycled automatically, one run at a time.
+  # Startup resumes an interrupted run; when a run ends the least-recently-run
+  # target starts next (a failing target is recorded and rotates on). An empty
+  # list disables the rotation — manual starts from the Jobs tab still work.
+  targets:
+    - https://asurascans.com/comics
+    - https://en-thunderscans.com/comics/
+    - https://flamecomics.xyz/browse

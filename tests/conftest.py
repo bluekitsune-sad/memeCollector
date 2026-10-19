@@ -7,6 +7,7 @@ adapter for the duration of one test, restoring the registry afterwards).
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Callable, Iterator
 from dataclasses import replace
@@ -28,6 +29,24 @@ ImageFactory = Callable[..., Path]
 
 #: Factory for overridden :class:`~backend.config.loader.Settings` (defaults keep tests offline/fast).
 SettingsFactory = Callable[..., Settings]
+
+#: Sentinel catalog that resolves to no adapter (see ``_block_live_backfill_rotation``).
+_NO_ADAPTER_CATALOG = "https://backfill-rotation-disabled.invalid/catalog"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _block_live_backfill_rotation() -> None:
+    """Keep the passive ``backfill.targets`` rotation offline for the whole suite.
+
+    App-booting tests derive settings from the real ``config/config.yaml``,
+    whose rotation targets name live catalogs — startup would otherwise launch
+    a real crawl from inside the tests. The env override (which beats YAML)
+    points the rotation at a host no adapter handles, so
+    :func:`backend.jobs.backfill.maybe_start_next_target` no-ops everywhere.
+    Tests that exercise rotation build their own ``backfill.targets`` via
+    ``dataclasses.replace`` and never re-read the environment.
+    """
+    os.environ["MEME_BACKFILL_TARGETS"] = _NO_ADAPTER_CATALOG
 
 
 @pytest.fixture

@@ -40,7 +40,7 @@ from backend.api.routes_settings import router as settings_router
 from backend.api.routes_watch import router as watch_router
 from backend.config import Settings, load_settings
 from backend.database.database import initialize_database
-from backend.jobs.backfill import resume_interrupted_backfill
+from backend.jobs.backfill import maybe_start_next_target, resume_interrupted_backfill
 from backend.jobs.recovery import recover_interrupted_jobs
 from backend.jobs.resume import resume_interrupted_work
 from backend.jobs.watch import WatchSupervisor
@@ -119,13 +119,17 @@ async def _lifespan(app: FastAPI, settings: Settings | None) -> AsyncIterator[No
 async def _resume_after_restart(app: FastAPI, interrupted: list[dict[str, object]]) -> None:
     """Background startup resume: interrupted crawls, orphaned stages, the backfill.
 
+    When no backfill was interrupted, the ``backfill.targets`` rotation picks
+    its least-recently-run catalog — passive gathering continues unattended.
+
     Never raises — every path degrades to "the next crawl/watch pass or a
     manual action finishes the work" (PRD §36).
     """
     try:
         if interrupted:
             await resume_interrupted_work(app, interrupted)
-        resume_interrupted_backfill(app)
+        if not resume_interrupted_backfill(app):
+            maybe_start_next_target(app)
     except asyncio.CancelledError:
         raise
     except Exception:

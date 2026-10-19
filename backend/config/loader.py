@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, fields, replace
+from dataclasses import MISSING, dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -142,11 +142,16 @@ class BackfillSettings:
     ``enabled`` gates both ``POST /api/backfill/start`` and the startup resume
     of an interrupted backfill; ``delay_seconds`` is the pause between comics
     (on top of each crawl's own ``crawler.delay_seconds``), keeping the pass
-    inside the AGENTS.md §9 crawl-rate limits.
+    inside the AGENTS.md §9 crawl-rate limits. ``targets`` is the passive
+    rotation: catalog URLs cycled automatically, one run at a time — each run
+    ends (or is resumed after a restart, then finishes) before the next
+    least-recently-run target starts; an empty list disables the rotation
+    (manual starts via the API still work).
     """
 
     enabled: bool = True
     delay_seconds: float = 2.0
+    targets: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -161,6 +166,15 @@ class Settings:
     watch: WatchSettings
     backfill: BackfillSettings
     config_path: Path
+
+
+def _field_default(fld: Any) -> Any:
+    """The effective default of a dataclass field (honours ``default_factory``)."""
+    if fld.default is not MISSING:
+        return fld.default
+    if fld.default_factory is not MISSING:
+        return fld.default_factory()
+    return None
 
 
 def _coerce(value: Any, reference: Any) -> Any:
@@ -181,6 +195,13 @@ def _coerce(value: Any, reference: Any) -> Any:
         return int(value)
     if isinstance(reference, float):
         return float(value)
+    if isinstance(reference, list):
+        # Env overrides arrive as comma-separated strings; YAML supplies lists.
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, (list, tuple)):
+            return [str(item) for item in value]
+        raise ValueError(f"cannot parse list from {value!r}")
     return str(value)
 
 
@@ -193,32 +214,33 @@ def _build_section(section_cls: type, data: Any, section_name: str) -> Any:
         if key not in field_map:
             logger.warning("unknown config key ignored section=%s key=%s", section_name, key)
     values: dict[str, Any] = {}
-    for field in field_map.values():
-        if field.name in data:
-            if section_name == "ai" and field.name == "api_key":
+    for fld in field_map.values():
+        default = _field_default(fld)
+        if fld.name in data:
+            if section_name == "ai" and fld.name == "api_key":
                 logger.warning("config key ignored: set OPENROUTER_API_KEY in .env instead of YAML")
                 continue
-            values[field.name] = _coerce(data[field.name], field.default)
-        elif field.default is not None:
-            values[field.name] = _coerce(field.default, field.default)
+            values[fld.name] = _coerce(data[fld.name], default)
+        elif default is not None:
+            values[fld.name] = _coerce(default, default)
     return section_cls(**values)
 
 
 def _env_overrides(section: Any, section_name: str) -> Any:
     """Apply ``MEME_<SECTION>_<KEY>`` env vars (then alias vars) to a section; returns the updated section."""
     current = section
-    for field in fields(section):
-        raw = os.environ.get(f"MEME_{section_name.upper()}_{field.name.upper()}")
+    for fld in fields(section):
+        raw = os.environ.get(f"MEME_{section_name.upper()}_{fld.name.upper()}")
         if raw:
-            current = replace(current, **{field.name: _coerce(raw, field.default)})
+            current = replace(current, **{fld.name: _coerce(raw, _field_default(fld))})
     for env_name, (alias_section, alias_key) in _ENV_ALIASES.items():
         if alias_section != section_name:
             continue
         raw = os.environ.get(env_name)
         if not raw:
             continue
-        field = next(item for item in fields(current) if item.name == alias_key)
-        current = replace(current, **{alias_key: _coerce(raw, field.default)})
+        fld = next(item for item in fields(current) if item.name == alias_key)
+        current = replace(current, **{alias_key: _coerce(raw, _field_default(fld))})
     return current
 
 
