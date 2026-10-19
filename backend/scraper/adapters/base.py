@@ -160,6 +160,19 @@ class SiteAdapter(ABC):
     #: (static HTML), ``True`` = Playwright Chromium render (PRD §8).
     render: bool = False
 
+    #: Only meaningful with ``render = True``: step-scroll the page to the bottom
+    #: before capture so lazy-mounted comment sections render. Set by sites whose
+    #: comments mount via scroll observers (verified live 2026-10-13 for
+    #: flamecomics.xyz, vortexscans.org, hivetoons.org).
+    scroll_before_capture: bool = False
+
+    #: Only meaningful with ``render = True``: CSS selector of a control to CLICK
+    #: after the scroll pass, before the DOM is captured — for UIs that render
+    #: comment items only after an interaction (the vortex platform's
+    #: ``button[aria-label^="Comments"]`` drawer trigger; verified live
+    #: 2026-10-19: scrolling alone never mounts the items).
+    click_before_capture: str | None = None
+
     @abstractmethod
     def can_handle(self, url: str) -> bool:
         """Return True when this adapter owns ``url``."""

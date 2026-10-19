@@ -67,6 +67,24 @@ logger = logging.getLogger(__name__)
 
 _RETRYABLE_STATUSES = frozenset({429})
 
+#: Cap on waiting for the full ``load`` event after ``domcontentloaded`` — ad-heavy
+#: readers (flamecomics.xyz, verified 2026-10-13) keep ``load`` pending forever on
+#: hanging third-party requests, so a hard ``goto(wait_until="load")`` times out
+#: every page; the DOM is captured after this cap instead.
+_LOAD_WAIT_CAP_MS = 15_000
+
+#: Opt-in scroll pass (``SiteAdapter.scroll_before_capture``) for sites whose
+#: comment section lazy-mounts only when scrolled into view (verified live for
+#: vortexscans.org / hivetoons.org / flamecomics.xyz, 2026-10-13).
+_SCROLL_STEPS = 25
+_SCROLL_STEP_DELAY_MS = 200
+_SCROLL_SETTLE_MS = 3_000
+
+#: Opt-in pre-capture click (``SiteAdapter.click_before_capture``): the vortex
+#: platform renders comment items only after its "Comments {n}" drawer button
+#: is clicked — scrolling alone never mounts them (verified live 2026-10-19).
+_CLICK_SETTLE_MS = 3_000
+
 
 class PageFetchError(Exception):
     """A page could not be fetched (HTTP error or exhausted retries)."""
@@ -205,8 +223,16 @@ class HttpxFetcher:
 class PlaywrightFetcher:
     """Rendered-page fetcher: Playwright Chromium, headed when ``crawler.debug`` is set (PRD §8)."""
 
-    def __init__(self, *, settings: Settings) -> None:
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        scroll: bool = False,
+        click_selector: str | None = None,
+    ) -> None:
         self._settings = settings
+        self._scroll = scroll
+        self._click_selector = click_selector
         self._playwright = None
         self._browser = None
         self._page = None
@@ -245,7 +271,9 @@ class PlaywrightFetcher:
         assert self._page is not None
         timeout_ms = int(self._settings.crawler.request_timeout_seconds * 1000)
         try:
-            response = await self._page.goto(url, wait_until="load", timeout=timeout_ms)
+            # domcontentloaded is reliable everywhere; the full `load` event is
+            # waited for separately with a cap (see _LOAD_WAIT_CAP_MS).
+            response = await self._page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
         except PlaywrightError as exc:
             return _Attempt(status=None, error=f"{type(exc).__name__}: {exc}")
         if response is None:
@@ -255,12 +283,69 @@ class PlaywrightFetcher:
             await ensure_safe_url(self._page.url)
         except UnsafeURLError as exc:
             raise PageFetchError(f"unsafe url blocked: {exc}") from exc
+        # Give post-hydration work (client-rendered comments) a chance to land.
+        try:
+            await self._page.wait_for_load_state("load", timeout=_LOAD_WAIT_CAP_MS)
+        except PlaywrightError:
+            logger.debug("load state never reached; capturing current DOM url=%s", url)
+        if self._scroll:
+            await self._scroll_to_bottom()
+        if self._click_selector is not None:
+            await self._click_trigger()
         body = await self._page.content() if 200 <= response.status < 300 else ""
         return _Attempt(
             status=response.status,
             body=body,
             retry_after=parse_retry_after(response.headers.get("retry-after")),
         )
+
+    async def _click_trigger(self) -> None:
+        """Click the adapter's pre-capture control (e.g. the comments drawer button).
+
+        A plain DOM click via ``evaluate`` — NOT an actionability-checked
+        ``locator.click``: the vortex platform's floating "Comments" button is
+        CSS-animated, so Playwright waits forever for it to go "stable" and
+        times out, while the DOM click works fine (verified live 2026-10-19).
+        """
+        assert self._page is not None
+        assert self._click_selector is not None
+        try:
+            clicked = await self._page.evaluate(
+                """(selector) => {
+                    const el = document.querySelector(selector);
+                    if (!el) return false;
+                    el.click();
+                    return true;
+                }""",
+                self._click_selector,
+            )
+        except PlaywrightError:
+            logger.debug(
+                "pre-capture click raised selector=%s",
+                self._click_selector,
+                exc_info=True,
+            )
+            return
+        if not clicked:
+            # A missing/changed trigger degrades to an empty comment section —
+            # recorded by the adapter's "matched nothing" warning, never fatal.
+            logger.debug(
+                "pre-capture trigger absent selector=%s", self._click_selector
+            )
+            return
+        await self._page.wait_for_timeout(_CLICK_SETTLE_MS)
+
+    async def _scroll_to_bottom(self) -> None:
+        """Step-scroll to the page bottom so lazy-mounted sections (comments) render."""
+        assert self._page is not None
+        try:
+            for _ in range(_SCROLL_STEPS):
+                await self._page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+                await self._page.wait_for_timeout(_SCROLL_STEP_DELAY_MS)
+            await self._page.wait_for_timeout(_SCROLL_SETTLE_MS)
+        except PlaywrightError:
+            # A mid-scroll navigation/teardown must not fail the page capture.
+            logger.debug("scroll pass interrupted", exc_info=True)
 
     async def aclose(self) -> None:
         for closer in (self._page, self._browser):
@@ -282,7 +367,11 @@ class PlaywrightFetcher:
 def build_fetcher(adapter: SiteAdapter, settings: Settings) -> PageFetcher:
     """Pick the fetch strategy an adapter declared via its ``render`` flag."""
     if adapter.render:
-        return PlaywrightFetcher(settings=settings)
+        return PlaywrightFetcher(
+            settings=settings,
+            scroll=adapter.scroll_before_capture,
+            click_selector=adapter.click_before_capture,
+        )
     return HttpxFetcher(settings=settings)
 
 

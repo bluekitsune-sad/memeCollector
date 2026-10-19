@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from playwright.async_api import Error as PlaywrightError
 
 from backend.config import load_settings
 from backend.scraper.adapters import CrawlScope, ScopeKind
@@ -376,3 +377,250 @@ async def test_browser_launch_guarded_when_chromium_missing(make_settings) -> No
         return
     await fetcher.aclose()
     pytest.skip("chromium installed — BrowserNotInstalledError path not observable")
+
+
+# ---------------------------------------------------------------------------
+# Rendered-page capture: domcontentloaded + capped load-wait + opt-in scroll
+# and opt-in pre-capture DOM click (SiteAdapter.scroll_before_capture /
+# SiteAdapter.click_before_capture — flamecomics/vortexscans/hivetoons).
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, status: int = 200) -> None:
+        self.status = status
+        self.headers: dict[str, str] = {}
+
+
+class _FakePage:
+    """Duck-typed Playwright page recording every interaction (no browser needed).
+
+    ``evaluate`` doubles as the pre-capture DOM-click surface: the click
+    expression passes the selector as its single argument, which is recorded
+    in ``click_calls`` (or fails, per the constructor flags).
+    """
+
+    def __init__(
+        self,
+        *,
+        status: int = 200,
+        load_error: bool = False,
+        evaluate_error: bool = False,
+        click_error: bool = False,
+        click_absent: bool = False,
+    ) -> None:
+        self.url = "https://fixture.test/comic/chapter-42"
+        self.goto_calls: list[tuple[str, str | None, int | None]] = []
+        self.load_state_calls: list[tuple[str, int | None]] = []
+        self.evaluate_calls: list[str] = []
+        self.timeouts: list[int] = []
+        self.click_calls: list[str] = []
+        self.content_calls = 0
+        self._status = status
+        self._load_error = load_error
+        self._evaluate_error = evaluate_error
+        self._click_error = click_error
+        self._click_absent = click_absent
+
+    async def goto(self, url: str, *, wait_until: str | None = None, timeout: int | None = None):
+        self.goto_calls.append((url, wait_until, timeout))
+        return _FakeResponse(self._status)
+
+    async def wait_for_load_state(self, state: str, *, timeout: int | None = None) -> None:
+        self.load_state_calls.append((state, timeout))
+        if self._load_error:
+            raise PlaywrightError("Timeout waiting for load state")
+
+    async def evaluate(self, expression: str, *args) -> object:
+        if self._evaluate_error:
+            raise PlaywrightError("Execution context was destroyed")
+        self.evaluate_calls.append(expression)
+        if "el.click()" in expression:  # the pre-capture DOM click
+            selector = args[0] if args else "<no-arg>"
+            if self._click_error:
+                raise PlaywrightError("Execution context was destroyed mid-click")
+            if self._click_absent:
+                return False
+            self.click_calls.append(str(selector))
+            return True
+        return None
+
+    async def wait_for_timeout(self, timeout_ms: int) -> None:
+        self.timeouts.append(timeout_ms)
+
+    async def content(self) -> str:
+        self.content_calls += 1
+        return "<html><body>rendered</body></html>"
+
+
+def _rendered_fetcher(
+    make_settings, *, scroll: bool, click_selector: str | None = None
+) -> PlaywrightFetcher:
+    return PlaywrightFetcher(
+        settings=make_settings(), scroll=scroll, click_selector=click_selector
+    )
+
+
+async def test_rendered_fetch_waits_for_load_with_cap(make_settings) -> None:
+    """goto lands on domcontentloaded; the full load event is capped, then captured."""
+    from backend.scraper.crawler import _LOAD_WAIT_CAP_MS
+
+    fetcher = _rendered_fetcher(make_settings, scroll=False)
+    page = _FakePage()
+    fetcher._page = page
+    try:
+        attempt = await fetcher._attempt("https://fixture.test/comic/chapter-42")
+    finally:
+        fetcher._page = None
+    assert page.goto_calls == [("https://fixture.test/comic/chapter-42", "domcontentloaded", 30_000)]
+    assert page.load_state_calls == [("load", _LOAD_WAIT_CAP_MS)]
+    assert attempt.status == 200
+    assert attempt.body == "<html><body>rendered</body></html>"
+    assert page.content_calls == 1
+    assert page.evaluate_calls == []  # no scroll requested
+
+
+async def test_rendered_fetch_tolerates_hanging_load_event(make_settings) -> None:
+    """Ad-heavy readers never fire `load` — the DOM must still be captured."""
+    fetcher = _rendered_fetcher(make_settings, scroll=False)
+    page = _FakePage(load_error=True)
+    fetcher._page = page
+    try:
+        attempt = await fetcher._attempt("https://fixture.test/comic/chapter-42")
+    finally:
+        fetcher._page = None
+    assert attempt.status == 200
+    assert attempt.body == "<html><body>rendered</body></html>"
+    assert page.content_calls == 1
+
+
+async def test_scroll_flag_step_scrolls_before_capture(make_settings) -> None:
+    from backend.scraper.crawler import (
+        _SCROLL_SETTLE_MS,
+        _SCROLL_STEP_DELAY_MS,
+        _SCROLL_STEPS,
+    )
+
+    fetcher = _rendered_fetcher(make_settings, scroll=True)
+    page = _FakePage()
+    fetcher._page = page
+    try:
+        attempt = await fetcher._attempt("https://fixture.test/comic/chapter-42")
+    finally:
+        fetcher._page = None
+    assert len(page.evaluate_calls) == _SCROLL_STEPS
+    assert all("scrollBy" in expr for expr in page.evaluate_calls)
+    # step delays + one settle wait at the end
+    assert page.timeouts == [_SCROLL_STEP_DELAY_MS] * _SCROLL_STEPS + [_SCROLL_SETTLE_MS]
+    # the load-cap runs first, the DOM is captured last
+    assert page.load_state_calls and page.content_calls == 1
+    assert attempt.status == 200
+
+
+async def test_scroll_interrupted_still_captures_page(make_settings) -> None:
+    """A mid-scroll navigation/teardown is logged, never a failed page (PRD §36)."""
+    fetcher = _rendered_fetcher(make_settings, scroll=True)
+    page = _FakePage(evaluate_error=True)
+    fetcher._page = page
+    try:
+        attempt = await fetcher._attempt("https://fixture.test/comic/chapter-42")
+    finally:
+        fetcher._page = None
+    assert attempt.status == 200
+    assert page.content_calls == 1
+
+
+def test_build_fetcher_passes_adapter_scroll_flag(make_settings) -> None:
+    settings = make_settings()
+
+    class ScrollAdapter(FakeSiteAdapter):
+        site = "scroll-fixture"
+        render = True
+        scroll_before_capture = True
+
+    fetcher = build_fetcher(ScrollAdapter(), settings)
+    assert isinstance(fetcher, PlaywrightFetcher)
+    assert fetcher._scroll is True
+
+    class RenderedOnly(FakeSiteAdapter):
+        site = "rendered-fixture-2"
+        render = True
+
+    plain = build_fetcher(RenderedOnly(), settings)
+    assert isinstance(plain, PlaywrightFetcher)
+    assert plain._scroll is False
+    assert plain._click_selector is None
+
+
+async def test_pre_capture_click_runs_and_settles(make_settings) -> None:
+    """The vortex drawer trigger is DOM-clicked after scroll, before the capture."""
+    from backend.scraper.crawler import _CLICK_SETTLE_MS
+
+    selector = 'button[aria-label^="Comments"]'
+    fetcher = _rendered_fetcher(
+        make_settings, scroll=True, click_selector=selector
+    )
+    page = _FakePage()
+    fetcher._page = page
+    try:
+        attempt = await fetcher._attempt("https://fixture.test/comic/chapter-42")
+    finally:
+        fetcher._page = None
+    assert page.click_calls == [selector]
+    # settle wait is the LAST timeout after the scroll step delays
+    assert page.timeouts[-1] == _CLICK_SETTLE_MS
+    assert attempt.status == 200
+    assert page.content_calls == 1
+
+
+async def test_pre_capture_click_failure_still_captures(make_settings) -> None:
+    """A broken click (destroyed context) degrades to capture (PRD §36)."""
+    from backend.scraper.crawler import _SCROLL_SETTLE_MS, _SCROLL_STEP_DELAY_MS, _SCROLL_STEPS
+
+    fetcher = _rendered_fetcher(
+        make_settings, scroll=True, click_selector="button[aria-label^='Comments']"
+    )
+    page = _FakePage(click_error=True)
+    fetcher._page = page
+    try:
+        attempt = await fetcher._attempt("https://fixture.test/comic/chapter-42")
+    finally:
+        fetcher._page = None
+    assert attempt.status == 200
+    assert page.content_calls == 1
+    # only the scroll settle fires — the click's settle is skipped on failure
+    assert page.timeouts == [_SCROLL_STEP_DELAY_MS] * _SCROLL_STEPS + [_SCROLL_SETTLE_MS]
+
+
+async def test_pre_capture_trigger_absent_still_captures(make_settings) -> None:
+    """A missing/changed trigger selector degrades to capture (PRD §36)."""
+    from backend.scraper.crawler import _SCROLL_SETTLE_MS, _SCROLL_STEP_DELAY_MS, _SCROLL_STEPS
+
+    fetcher = _rendered_fetcher(
+        make_settings, scroll=True, click_selector="button[aria-label^='Comments']"
+    )
+    page = _FakePage(click_absent=True)
+    fetcher._page = page
+    try:
+        attempt = await fetcher._attempt("https://fixture.test/comic/chapter-42")
+    finally:
+        fetcher._page = None
+    assert page.click_calls == []  # reported absent, not clicked
+    assert attempt.status == 200
+    assert page.content_calls == 1
+    # only the scroll settle fires — no click settle when nothing was clicked
+    assert page.timeouts == [_SCROLL_STEP_DELAY_MS] * _SCROLL_STEPS + [_SCROLL_SETTLE_MS]
+
+
+def test_build_fetcher_passes_adapter_click_selector(make_settings) -> None:
+    settings = make_settings()
+
+    class DrawerAdapter(FakeSiteAdapter):
+        site = "drawer-fixture"
+        render = True
+        scroll_before_capture = True
+        click_before_capture = 'button[aria-label^="Comments"]'
+
+    fetcher = build_fetcher(DrawerAdapter(), settings)
+    assert isinstance(fetcher, PlaywrightFetcher)
+    assert fetcher._click_selector == 'button[aria-label^="Comments"]'
