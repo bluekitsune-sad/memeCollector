@@ -12,7 +12,7 @@ Requirements docs (read in this order): `PRD.md` → `AGENTS.md` → `TODO.md`.
 ## Features
 
 - **Comment-only collection** — image/GIF/video attachments from the comment sections of eight supported sites (AsuraScans, MangaDex, MangaPark, Comix, ThunderScans, FlameComics, VortexScans, HiveToons); panels, logos, nav icons and avatars are never downloaded (PRD §6).
-- **Site-wide backfill** — the Jobs page has a dedicated **Site Backfill** section (above the AI status card): start a catalog crawl (default `asurascans.com/comics`), then pause / resume / cancel / **retry failed** / **run again**, with a progress bar, live counts, the current comic and an expandable per-comic list (PRD §35–36).
+- **Site-wide backfill** — the Jobs page has a dedicated **Site Backfill** section (above the AI status card): start a catalog crawl (default `asurascans.com/comics`), then pause / resume / cancel / **retry failed** / **run again**, with a progress bar, live counts, the current comic and an expandable per-comic list (PRD §35–36). The `backfill.targets` config list rotates whole catalogs **passively** — AsuraScans, ThunderScans and FlameComics cycle one run at a time, continuing across restarts.
 - **Auto-resume after restart** — interrupted crawls and a stranded backfill relaunch themselves on the next boot "when they can" (background task at startup; zombie rows are failed, never wedged — PRD §36).
 - **Resilient AI** — per-item retry with backoff, then an automatic **revive** of retryable failures after `ai.revive_after_seconds` (capped by `ai.max_item_revives`); permanent causes (video, bad key) are never retried; manual Reanalyze resets the slate (PRD §18/§36).
 - **Duplicate-flag lifecycle** — every item flagged `dup`/`nondup`, `dup` auto-deleted after 7 days unless manually unflagged; gallery filter + header badges, and the badges stay **faceted** (full `dup`/`nondup`/`unflagged` and processing-status breakdown) while the gallery itself is filtered (PRD §12.1, §19).
@@ -124,7 +124,7 @@ names, hybrid search weights — PRD §22/§40). Notable sections:
 
 | Section | Keys | Meaning |
 |---|---|---|
-| `backfill` | `enabled`, `delay_seconds` | Site-wide backfill master switch and the pause between comics (on top of `crawler.delay_seconds`). `enabled: false` blocks new runs and the startup resume of an interrupted one |
+| `backfill` | `enabled`, `delay_seconds`, `targets` | Site-wide backfill master switch, the pause between comics (on top of `crawler.delay_seconds`), and the passive rotation list — catalog URLs cycled automatically one run at a time (startup resumes an interrupted run; each natural end starts the least-recently-run target; empty list = rotation off). `enabled: false` blocks new runs, the startup resume, and the rotation |
 | `watch` | `enabled`, `interval_minutes`, `max_pages_per_run` | Passive re-scan supervisor cadence and page cap |
 | `ai` | `revive_after_seconds` (default 1800), `max_item_revives` (default 3) | Second-try schedule for retryable AI failures, and how many revives each item gets before it stays `FAILED` |
 
