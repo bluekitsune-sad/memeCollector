@@ -54,6 +54,7 @@ meme/
 ├── tests/                     # pytest suite + watch_support.py, fixtures/ (HTML pages, fake_adapter.py)
 ├── config/                    # config.yaml (storage, crawler, ai, search, watch, backfill)
 ├── .env.example
+├── start.bat                   # one-click launcher: backend :8000 + frontend :3100 (each in its own window; idempotent)
 ├── requirements.txt
 ├── README.md
 ├── PRD.md

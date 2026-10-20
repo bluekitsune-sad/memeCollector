@@ -46,6 +46,14 @@ offline with the deterministic mock provider.
 
 ## Run
 
+**One-click:** double-click `start.bat` (project root) — it starts the backend
+(`127.0.0.1:8000`) and the frontend (`127.0.0.1:3100`, building first if
+`frontend/.next` is missing), each in its own console window. It is
+idempotent: ports already in use are reported and skipped. Close a service's
+window to stop that service; run `start.bat` again to bring it back.
+
+Manual startup:
+
 ```powershell
 # Backend (from the project root; binds 127.0.0.1:8000)
 uvicorn backend.main:app --host 127.0.0.1 --port 8000
