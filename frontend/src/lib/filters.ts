@@ -27,8 +27,17 @@ export const FILTER_KEYS = [
   "emotion",
 ] as const;
 
-/** Hostnames of the MVP adapters (AGENTS.md §5) — merged with observed sites. */
-export const SUPPORTED_SITES = ["asurascans.com", "mangadex.org", "mangapark.net", "comix.to"];
+/** Hostnames of every adapter (AGENTS.md §5) — merged with observed sites. */
+export const SUPPORTED_SITES = [
+  "asurascans.com",
+  "mangadex.org",
+  "mangapark.net",
+  "comix.to",
+  "en-thunderscans.com",
+  "flamecomics.xyz",
+  "vortexscans.org",
+  "hivetoons.org",
+];
 
 export const TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "All types" },
@@ -104,11 +113,16 @@ export function hasActiveFilters(filters: FilterValues): boolean {
   return Object.values(filters).some((value) => value !== undefined && value !== "");
 }
 
-/** Site select options: supported hosts plus every site seen in the current page. */
-export function siteOptions(observed: (string | null)[]): string[] {
+/**
+ * Site select options: supported hosts plus every site seen in the current
+ * page, plus the active selection — so a shared filtered URL never renders an
+ * empty Source control just because its site is unobserved.
+ */
+export function siteOptions(observed: (string | null)[], selected?: string): string[] {
   const merged = new Set<string>(SUPPORTED_SITES);
   for (const site of observed) {
     if (site) merged.add(site);
   }
+  if (selected) merged.add(selected);
   return [...merged].sort((a, b) => a.localeCompare(b));
 }

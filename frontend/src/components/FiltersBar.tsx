@@ -51,7 +51,7 @@ export default function FiltersBar({ value, onChange, observedSites, showEmotion
           onChange={(event) => patch({ site: event.target.value })}
         >
           <option value="">All sites</option>
-          {siteOptions(observedSites).map((site) => (
+          {siteOptions(observedSites, value.site).map((site) => (
             <option key={site} value={site}>
               {site}
             </option>
