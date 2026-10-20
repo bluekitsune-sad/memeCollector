@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { mediaFileUrl } from "@/lib/api";
 import { mediaKind, statusTone } from "@/lib/format";
@@ -18,13 +19,17 @@ interface MediaCardProps {
 /** One lazy-loaded thumbnail card (PRD §25, §50 — never load originals). */
 export default function MediaCard({ item, showScore = false }: MediaCardProps) {
   const [thumbFailed, setThumbFailed] = useState(false);
+  const searchParams = useSearchParams();
   const kind = mediaKind(item);
   const tone = statusTone(item.processing_status);
   const alt = item.title ?? item.original_filename ?? `Media ${item.id}`;
   const score = typeof item.score === "number" ? Math.round(item.score * 100) : null;
+  // Carry the grid's own query (filters + page + search text) into the detail
+  // page so prev/next walks the exact result set this card was part of.
+  const qs = searchParams.toString();
 
   return (
-    <Link href={`/media/${item.id}`} className="card" aria-label={`Open ${alt}`}>
+    <Link href={`/media/${item.id}${qs === "" ? "" : `?${qs}`}`} className="card" aria-label={`Open ${alt}`}>
       <div className="card-media">
         {thumbFailed ? (
           <span className="card-placeholder">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import DetailActions, { type Feedback } from "./DetailActions";
 import DetailInfo from "./DetailInfo";
 import MediaViewer from "./MediaViewer";
@@ -18,7 +18,8 @@ import {
   updateMedia,
 } from "@/lib/api";
 import { useAsync } from "@/lib/hooks";
-import type { MediaUpdate } from "@/lib/types";
+import { useMediaNeighbors } from "@/lib/neighbors";
+import type { MediaDetail, MediaUpdate } from "@/lib/types";
 
 /** Full media page: preview + editable metadata + provenance (PRD §26–§28, §31). */
 export default function MediaDetailClient({ id }: { id: number }) {
@@ -30,6 +31,54 @@ export default function MediaDetailClient({ id }: { id: number }) {
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);
   const [tagsDraft, setTagsDraft] = useState<string[] | null>(null);
+
+  // Keep the last loaded item so stepping to a neighbour shows the outgoing
+  // image until the incoming one arrives instead of flashing a spinner.
+  const [lastSeen, setLastSeen] = useState<MediaDetail | null>(null);
+  useEffect(() => {
+    if (item) setLastSeen(item);
+  }, [item]);
+
+  // A new id starts clean: drafts and feedback belong to the previous image.
+  useEffect(() => {
+    setBusy(false);
+    setFeedback(null);
+    setTitleDraft(null);
+    setDescriptionDraft(null);
+    setTagsDraft(null);
+  }, [id]);
+
+  const { canPrev, canNext, goPrev, goNext } = useMediaNeighbors(id);
+
+  // ← / → step through the grid; fields and media controls keep their arrows.
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent): void {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          tag === "VIDEO" ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+      event.preventDefault();
+      if (event.key === "ArrowLeft") {
+        if (canPrev) void goPrev();
+      } else if (canNext) {
+        void goNext();
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [canPrev, canNext, goPrev, goNext]);
+
+  const shown = item ?? lastSeen;
 
   async function apply(update: MediaUpdate, success: string): Promise<boolean> {
     setBusy(true);
@@ -49,7 +98,7 @@ export default function MediaDetailClient({ id }: { id: number }) {
   async function commitTitle(): Promise<void> {
     const next = titleDraft;
     setTitleDraft(null);
-    if (next === null || next === (item?.title ?? "")) return;
+    if (next === null || next === (shown?.title ?? "")) return;
     await apply({ title: next }, "Title saved");
   }
 
@@ -66,8 +115,8 @@ export default function MediaDetailClient({ id }: { id: number }) {
   }
 
   async function toggleFavorite(): Promise<void> {
-    if (!item) return;
-    await apply({ is_favorite: !item.is_favorite }, item.is_favorite ? "Removed from favorites" : "Added to favorites");
+    if (!shown) return;
+    await apply({ is_favorite: !shown.is_favorite }, shown.is_favorite ? "Removed from favorites" : "Added to favorites");
   }
 
   async function unflag(): Promise<void> {
@@ -130,18 +179,31 @@ export default function MediaDetailClient({ id }: { id: number }) {
     }
   }
 
-  if (loading && !item) return <LoadingRow label="Loading media…" />;
-  if (!item) {
+  // A failed load of the current id wins over the stale image; otherwise the
+  // outgoing item stays visible until the incoming one has arrived.
+  if (item === null && error && !loading) return <ErrorPanel message={error} onRetry={reload} />;
+  if (!shown) {
+    if (loading) return <LoadingRow label="Loading media…" />;
     return <ErrorPanel message={error ?? "Media not found"} onRetry={reload} />;
   }
+  const pending = item === null; // next/previous id still loading
 
   return (
     <div className="detail">
       <div>
-        <MediaViewer item={item} />
+        <MediaViewer
+          key={shown.id}
+          item={shown}
+          nav={{
+            canPrev,
+            canNext,
+            onPrev: () => void goPrev(),
+            onNext: () => void goNext(),
+          }}
+        />
         <DetailActions
-          failed={item.processing_status === "FAILED"}
-          busy={busy}
+          failed={shown.processing_status === "FAILED"}
+          busy={busy || pending}
           feedback={feedback}
           onCopyFile={() => void copyFile()}
           onCopyImage={() => void copyImage()}
@@ -152,11 +214,11 @@ export default function MediaDetailClient({ id }: { id: number }) {
 
       <aside className="detail-side">
         <DetailInfo
-          item={item}
-          titleDraft={titleDraft ?? item.title ?? ""}
-          descriptionDraft={descriptionDraft ?? item.user_description ?? item.ai_metadata?.description ?? ""}
+          item={shown}
+          titleDraft={titleDraft ?? shown.title ?? ""}
+          descriptionDraft={descriptionDraft ?? shown.user_description ?? shown.ai_metadata?.description ?? ""}
           tagsDraft={tagsDraft}
-          busy={busy}
+          busy={busy || pending}
           onTitleDraft={setTitleDraft}
           onTitleCommit={() => void commitTitle()}
           onDescriptionDraft={setDescriptionDraft}
@@ -165,7 +227,7 @@ export default function MediaDetailClient({ id }: { id: number }) {
           onToggleFavorite={() => void toggleFavorite()}
           onUnflag={() => void unflag()}
         />
-        <SourceBlock sources={item.sources} collectedAt={item.created_at} />
+        <SourceBlock sources={shown.sources} collectedAt={shown.created_at} />
       </aside>
     </div>
   );
