@@ -75,6 +75,21 @@ export interface MediaItem {
   created_at: string;
 }
 
+/** Another copy of the same bytes — the dup-judgement strip (PRD §12.1). */
+export interface DuplicateCopy {
+  id: number;
+  title: string | null;
+  original_filename: string | null;
+  extension: string | null;
+  processing_status: string;
+  dup_status: string;
+  dup_flagged_at: string | null;
+  dup_expires_at: string | null;
+  created_at: string;
+  /** Earliest copy of the group — the one auto-deletion keeps. */
+  is_retained: boolean;
+}
+
 /** Detail payload (`MediaDetailOut`, PRD §26/§31). */
 export interface MediaDetail extends MediaItem {
   sha256: string | null;
@@ -84,6 +99,8 @@ export interface MediaDetail extends MediaItem {
   user_tags: string[];
   sources: MediaSource[];
   ai_metadata: AiMetadata | null;
+  /** Other copies of the same bytes, oldest first. */
+  duplicates: DuplicateCopy[];
 }
 
 /** PRD §19 header breakdown. `status_counts` is added by the backend in parallel. */

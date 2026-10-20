@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import DetailActions, { type Feedback } from "./DetailActions";
 import DetailInfo from "./DetailInfo";
+import DuplicateCopies from "./DuplicateCopies";
 import MediaViewer from "./MediaViewer";
 import SourceBlock from "./SourceBlock";
 import { ErrorPanel, LoadingRow } from "@/components/StateBlocks";
@@ -201,6 +202,7 @@ export default function MediaDetailClient({ id }: { id: number }) {
             onNext: () => void goNext(),
           }}
         />
+        <DuplicateCopies item={shown} />
         <DetailActions
           failed={shown.processing_status === "FAILED"}
           busy={busy || pending}

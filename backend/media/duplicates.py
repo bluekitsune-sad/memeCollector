@@ -38,6 +38,7 @@ import sqlite3
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from backend.config import Settings
 from backend.database.database import transaction
@@ -172,6 +173,39 @@ def unflag(conn: sqlite3.Connection, media_id: int) -> bool:
         )
     logger.info("dup unflagged by user media_id=%d", media_id)
     return True
+
+
+def find_copies(conn: sqlite3.Connection, media_id: int) -> list[dict[str, Any]]:
+    """Other rows sharing this item's SHA-256, oldest first — the judgement view.
+
+    The detail page shows these next to the item being viewed so a ``dup``
+    flag can be judged by eye (PRD §12.1). The earliest member of the whole
+    group (``created_at``, tie-break ``id``) is the *retained* copy and is
+    marked ``is_retained``; every other member is a flagged later copy. Each
+    entry carries the computed ``dup_expires_at`` countdown of its flag.
+
+    Empty for unknown ids and for rows with no hash or no other copy.
+    """
+    row = conn.execute(
+        "SELECT sha256 FROM media WHERE id = ?", (media_id,)
+    ).fetchone()
+    if row is None or row["sha256"] is None:
+        return []
+    members = conn.execute(
+        "SELECT id, title, original_filename, extension, processing_status, "
+        "dup_status, dup_flagged_at, created_at FROM media "
+        "WHERE sha256 = ? ORDER BY created_at, id",
+        (row["sha256"],),
+    ).fetchall()
+    copies: list[dict[str, Any]] = []
+    for index, member in enumerate(members):
+        if int(member["id"]) == media_id:
+            continue
+        copy = dict(member)
+        copy["is_retained"] = index == 0
+        copy["dup_expires_at"] = dup_expires_at(member["dup_flagged_at"])
+        copies.append(copy)
+    return copies
 
 
 def purge_expired_dups(

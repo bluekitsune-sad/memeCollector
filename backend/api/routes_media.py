@@ -29,7 +29,7 @@ from backend.ai.provider import AIProviderError, create_provider
 from backend.ai.queue import process_single_media
 from backend.api.schemas import parse_json_list
 from backend.database.database import transaction
-from backend.media.duplicates import unflag
+from backend.media.duplicates import find_copies, unflag
 from backend.media.library import (
     MediaFilters,
     count_by_dup_status,
@@ -93,6 +93,27 @@ class MediaSourceOut(BaseModel):
     collected_at: str
 
 
+class DuplicateCopyOut(BaseModel):
+    """Another copy of the same bytes (shared SHA-256) — the dup-judgement strip.
+
+    The detail page shows these beside the item being viewed so a ``dup``
+    flag can be judged by eye before it expires (PRD §12.1).
+    """
+
+    id: int
+    title: str | None = None
+    original_filename: str | None = None
+    extension: str | None = None
+    processing_status: str
+    dup_status: str
+    dup_flagged_at: str | None = None
+    dup_expires_at: str | None = None
+    created_at: str
+    is_retained: bool = Field(
+        description="earliest copy of the group — the one auto-deletion keeps"
+    )
+
+
 class AiMetadataOut(BaseModel):
     """AI analysis record (PRD §15); absent until Milestone 3 runs."""
 
@@ -138,6 +159,10 @@ class MediaDetailOut(MediaOut):
     user_tags: list[str] = Field(default_factory=list)
     sources: list[MediaSourceOut] = Field(default_factory=list)
     ai_metadata: AiMetadataOut | None = None
+    duplicates: list[DuplicateCopyOut] = Field(
+        default_factory=list,
+        description="other copies of the same bytes, oldest first (PRD §12.1)",
+    )
 
 
 class MediaListResponse(BaseModel):
@@ -355,6 +380,7 @@ def _require_media(request: Request, media_id: int) -> MediaDetailOut:
     if ai_record is not None:
         for key in ("tags", "emotions", "subjects", "suggested_search_phrases"):
             ai_record[key] = parse_json_list(ai_record.get(key))
+    record["duplicates"] = find_copies(request.app.state.db, media_id)
     return MediaDetailOut.model_validate(record)
 
 

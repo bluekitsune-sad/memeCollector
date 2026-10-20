@@ -954,6 +954,60 @@ button.stat:hover {
   opacity: 0.95;
 }
 
+/* --- Duplicate group strip (PRD §12.1 — judge a dup flag by eye) ---------- */
+
+.dup-group {
+  margin-top: 12px;
+}
+
+.dup-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dup-group-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dup-copy {
+  width: 176px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+  text-decoration: none;
+  display: block;
+}
+
+a.dup-copy:hover {
+  background: var(--bg-hover);
+}
+
+.dup-copy img,
+.dup-copy video {
+  width: 100%;
+  height: 140px;
+  object-fit: contain;
+  background: #000;
+  border-radius: 4px;
+  display: block;
+}
+
+.dup-copy-caption {
+  display: block;
+  margin-top: 5px;
+}
+
 .detail-side {
   display: flex;
   flex-direction: column;

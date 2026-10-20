@@ -301,6 +301,33 @@ def test_unflag_dup_endpoint_transitions_and_conflicts(
 
 
 # ---------------------------------------------------------------------------
+# GET /api/media/{id} — duplicate group for judgement (PRD §12.1)
+# ---------------------------------------------------------------------------
+
+
+def test_media_detail_lists_the_other_copies(
+    client: TestClient, tmp_path: Path
+) -> None:
+    _seed(client, tmp_path, "theta")
+    dup_id = _seed_dup(client, tmp_path, "theta-copy", of=1)
+
+    from_dup = client.get(f"/api/media/{dup_id}").json()["duplicates"]
+    assert [copy["id"] for copy in from_dup] == [1]
+    assert from_dup[0]["is_retained"] is True, "the earliest copy is the kept one"
+    assert from_dup[0]["dup_status"] == "nondup"
+    assert from_dup[0]["dup_expires_at"] is None
+    assert from_dup[0]["original_filename"].endswith(".png")
+
+    from_kept = client.get("/api/media/1").json()["duplicates"]
+    assert [copy["id"] for copy in from_kept] == [dup_id]
+    assert from_kept[0]["dup_status"] == "dup"
+    assert from_kept[0]["is_retained"] is False
+    assert from_kept[0]["dup_expires_at"] is not None, "the countdown the UI shows"
+
+    assert client.get("/api/media/999").status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # GET /api/media/random (PRD §30)
 # ---------------------------------------------------------------------------
 

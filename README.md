@@ -15,7 +15,7 @@ Requirements docs (read in this order): `PRD.md` → `AGENTS.md` → `TODO.md`.
 - **Site-wide backfill** — the Jobs page has a dedicated **Site Backfill** section (above the AI status card): start a catalog crawl (default `asurascans.com/comics`), then pause / resume / cancel / **retry failed** / **run again**, with a progress bar, live counts, the current comic and an expandable per-comic list (PRD §35–36). The `backfill.targets` config list rotates whole catalogs **passively** — AsuraScans, ThunderScans and FlameComics cycle one run at a time, continuing across restarts.
 - **Auto-resume after restart** — interrupted crawls and a stranded backfill relaunch themselves on the next boot "when they can" (background task at startup; zombie rows are failed, never wedged — PRD §36).
 - **Resilient AI** — per-item retry with backoff, then an automatic **revive** of retryable failures after `ai.revive_after_seconds` (capped by `ai.max_item_revives`); permanent causes (video, bad key) are never retried; manual Reanalyze resets the slate (PRD §18/§36).
-- **Duplicate-flag lifecycle** — every item flagged `dup`/`nondup`, `dup` auto-deleted after 7 days unless manually unflagged; gallery filter + header badges, and the badges stay **faceted** (full `dup`/`nondup`/`unflagged` and processing-status breakdown) while the gallery itself is filtered (PRD §12.1, §19).
+- **Duplicate-flag lifecycle** — every item flagged `dup`/`nondup`, `dup` auto-deleted after 7 days unless manually unflagged; gallery filter + header badges, and the badges stay **faceted** (full `dup`/`nondup`/`unflagged` and processing-status breakdown) while the gallery itself is filtered (PRD §12.1, §19). The detail page shows the **whole duplicate group** (retained copy + sibling dups with their deletion countdowns) under the preview so a flag can be judged by eye.
 - **Watch system** — a passive supervisor re-scans comics you've registered on an interval; add/remove/enable/disable via `POST /api/watch` (PRD §35/§39).
 - **Hybrid search** — keyword (SQLite FTS5) + semantic (FAISS/NumPy embeddings) + tag/metadata weights, with filters down to dup status (PRD §21–22, §24).
 - **Dark-theme-only UI** — a single dark palette (no light theme) with pixel-art flourishes: dot grid, stepped hard shadows, pixel focus ring.
@@ -69,7 +69,7 @@ All endpoints are JSON, local-only; interactive docs at
 |---|---|
 | `GET /api/media` | Paginated gallery. Query: `type`, `site`, `format`, `chapter`, `date_from`, `date_to`, `processing_status`, `dup_status`, `is_favorite`, `page`, `page_size` → `{items, page, page_size, total, dup_counts, status_counts}` |
 | `GET /api/media/random` | One random item; `scope=everything\|favorites\|gifs` (404 when nothing matches) |
-| `GET /api/media/{id}` | Detail: media fields, `sources[]` provenance, `ai_metadata`, dup info |
+| `GET /api/media/{id}` | Detail: media fields, `sources[]` provenance, `ai_metadata`, dup info, `duplicates[]` (other copies of the same bytes, oldest first, with `is_retained` + `dup_expires_at`) |
 | `PATCH /api/media/{id}` | Manual overrides: `title`, `user_description`, `user_tags[]`, `is_favorite` |
 | `DELETE /api/media/{id}` | Remove rows + files → `{id, deleted: true}` |
 | `POST /api/media/{id}/unflag-dup` | `dup` → `unflagged` (409 if not flagged) |

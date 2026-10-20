@@ -23,6 +23,7 @@ from backend.jobs.dup_job import run_dup_job
 from backend.media.duplicates import (
     DUP_RETENTION_DAYS,
     dup_expires_at,
+    find_copies,
     purge_expired_dups,
     scan_and_flag,
     unflag,
@@ -147,6 +148,35 @@ def test_scan_repairs_flag_when_retained_copy_is_deleted(db, dup_settings, tmp_p
 def test_scan_unknown_id_raises(db) -> None:
     with pytest.raises(ValueError, match="no media row"):
         scan_and_flag(db, 4242)
+
+
+# ---------------------------------------------------------------------------
+# find_copies (the detail page's dup-judgement view)
+# ---------------------------------------------------------------------------
+
+
+def test_find_copies_lists_group_oldest_first(db, dup_settings, tmp_path) -> None:
+    retained = _ingest_unique(db, dup_settings, tmp_path, "omega")
+    _ingest_copy(db, dup_settings, tmp_path, "omega-again", of=retained)
+    _ingest_copy(db, dup_settings, tmp_path, "omega-third", of=retained)
+
+    # ingest_download flags the later copies itself, exactly as live crawls do.
+    from_retained = find_copies(db, retained)
+    assert [copy["id"] for copy in from_retained] == [2, 3]
+    assert [copy["is_retained"] for copy in from_retained] == [False, False]
+    assert all(copy["dup_status"] == "dup" for copy in from_retained)
+    assert all(copy["dup_expires_at"] is not None for copy in from_retained)
+
+    from_third = find_copies(db, 3)
+    assert [copy["id"] for copy in from_third] == [retained, 2]
+    assert from_third[0]["is_retained"] is True, "the earliest copy is the retained one"
+    assert from_third[0]["dup_expires_at"] is None, "the retained copy never expires"
+
+
+def test_find_copies_empty_without_a_group(db, dup_settings, tmp_path) -> None:
+    sole = _ingest_unique(db, dup_settings, tmp_path, "solo")
+    assert find_copies(db, sole) == [], "a lone item has no judgement group"
+    assert find_copies(db, 4242) == [], "unknown ids are empty, not an error"
 
 
 # ---------------------------------------------------------------------------
